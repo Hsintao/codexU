@@ -22,7 +22,7 @@ make build
 Run the global shortcut validation and exclusive-conflict self-test:
 
 ```sh
-build/codexU.app/Contents/MacOS/codexU --self-test-global-shortcut
+build/CodexU.app/Contents/MacOS/CodexU --self-test-global-shortcut
 ```
 
 Run palette package validation and rendering tests:

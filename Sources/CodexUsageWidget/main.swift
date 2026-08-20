@@ -410,7 +410,7 @@ struct UsageSnapshot: Equatable {
         cloudLifetimeTokens: nil,
         local: nil,
         taskBoard: nil,
-        messages: ["正在读取 codexU 数据"]
+        messages: ["正在读取 CodexU 数据"]
     )
 
     func replacingTaskBoard(_ taskBoard: TaskBoard?) -> UsageSnapshot {
@@ -947,7 +947,7 @@ final class UsageStore: ObservableObject {
                 kind: .update,
                 runtimeScope: nil,
                 threadID: nil,
-                title: updateResult.latestVersionLabel ?? "codexU",
+                title: updateResult.latestVersionLabel ?? "CodexU",
                 since: updateResult.checkedAt
             ))
         }
@@ -1438,7 +1438,7 @@ final class CodexUsageReader {
             "params": [
                 "clientInfo": [
                     "name": "codexu",
-                    "title": "codexU",
+                    "title": "CodexU",
                     "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.1"
                 ],
                 "capabilities": [
@@ -5423,7 +5423,7 @@ struct SettingsPanelView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(language.text("设置", "Settings"))
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
-                Text("codexU")
+                Text("CodexU")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -11187,7 +11187,7 @@ private func localizedTaskTime(_ item: TaskItem, language: WidgetLanguage) -> St
 
 private func localizedReaderMessage(_ message: String, language: WidgetLanguage) -> String {
     guard !language.isChinese else { return message }
-    if message == "正在读取 codexU 数据" { return "Reading codexU data" }
+    if message == "正在读取 CodexU 数据" { return "Reading CodexU data" }
     if message.contains("未找到 codex") { return "Codex executable not found" }
     if message.contains("app-server 启动失败") { return "Failed to start app-server" }
     if message.contains("app-server 响应超时") { return "app-server response timed out" }
@@ -11342,7 +11342,7 @@ final class MainAppWindow: NSWindow {
             backing: .buffered,
             defer: false
         )
-        title = "codexU"
+        title = "CodexU"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         isReleasedWhenClosed = false
@@ -11591,10 +11591,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         let appMenuItem = NSMenuItem()
         mainMenu.addItem(appMenuItem)
 
-        let appMenu = NSMenu(title: "codexU")
+        let appMenu = NSMenu(title: "CodexU")
         appMenuItem.submenu = appMenu
         appMenu.addItem(NSMenuItem(
-            title: language.text("关于 codexU", "About codexU"),
+            title: language.text("关于 CodexU", "About CodexU"),
             action: #selector(showAboutPanel),
             keyEquivalent: ""
         ))
@@ -11607,7 +11607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         appMenu.addItem(.separator())
 
         let hideItem = NSMenuItem(
-            title: language.text("隐藏 codexU", "Hide codexU"),
+            title: language.text("隐藏 CodexU", "Hide CodexU"),
             action: #selector(NSApplication.hide(_:)),
             keyEquivalent: "h"
         )
@@ -11632,7 +11632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         appMenu.addItem(showAllItem)
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(
-            title: language.text("退出 codexU", "Quit codexU"),
+            title: language.text("退出 CodexU", "Quit CodexU"),
             action: #selector(quitFromMenu),
             keyEquivalent: "q"
         ))
@@ -12060,7 +12060,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             appearance: appearance
         )
         button.toolTip = presentation.tooltip
-        button.setAccessibilityLabel("codexU")
+        button.setAccessibilityLabel("CodexU")
         button.setAccessibilityValue(presentation.accessibilityValue)
         PerformanceMonitor.shared.end(performanceSpan)
     }

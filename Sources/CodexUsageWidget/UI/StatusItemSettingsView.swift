@@ -187,7 +187,7 @@ private struct StatusItemPreviewRow: View {
                     )
             }
             .frame(width: settingsAccessoryColumnWidth, height: settingsControlVisualHeight)
-            .accessibilityLabel("codexU")
+            .accessibilityLabel("CodexU")
             .accessibilityValue(presentation.accessibilityValue)
         }
     }

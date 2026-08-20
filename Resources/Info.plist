@@ -5,9 +5,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>codexU</string>
+	<string>CodexU</string>
 	<key>CFBundleExecutable</key>
-	<string>codexU</string>
+	<string>CodexU</string>
 	<key>CFBundleIconFile</key>
 	<string>codexU</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>codexU</string>
+	<string>CodexU</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

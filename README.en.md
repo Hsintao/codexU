@@ -93,12 +93,12 @@ GPT-5.3-Codex-Spark remains a research preview without a final published rate. S
 
 codexU is distributed outside the Mac App Store. On first launch, macOS may block it until you manually allow it:
 
-1. Open `codexU.app` once. If macOS says it cannot be opened, cancel the dialog.
+1. Open `CodexU.app` once. If macOS says it cannot be opened, cancel the dialog.
 2. Open **System Settings > Privacy & Security**.
-3. In the **Security** section, click **Open Anyway** for `codexU.app`.
+3. In the **Security** section, click **Open Anyway** for `CodexU.app`.
 4. Confirm with Touch ID or your password, then click **Open**.
 
-You can also right-click `codexU.app` in Finder and choose **Open**, then confirm the same security prompt.
+You can also right-click `CodexU.app` in Finder and choose **Open**, then confirm the same security prompt.
 
 codexU needs access to local Codex data under `~/.codex/`. When Claude Code stats are used, it also reads local transcripts, tasks, and status cache files under `~/.claude/`. If macOS asks for file or folder access, allow it so the widget can read local usage, threads, and automation metadata.
 
@@ -110,7 +110,7 @@ Download the DMG for your Mac architecture from GitHub Releases:
 - Intel: `codexU-<version>-mac-x86_64.dmg`
 
 1. Open the DMG.
-2. Drag `codexU.app` into the `Applications` folder.
+2. Drag `CodexU.app` into the `Applications` folder.
 3. Open codexU from `Applications`.
 4. Complete the **First Install: Privacy & Security** steps above if macOS blocks the first launch.
 

@@ -28,7 +28,7 @@ dist/codexU-<version>-mac-<arch>.dmg
 Because this build is ad-hoc signed, another Mac may show a Gatekeeper warning on first launch.
 
 If macOS blocks the app, open **System Settings > Privacy & Security**, scroll to
-the **Security** section, click **Open Anyway** for `codexU.app`, then confirm
+the **Security** section, click **Open Anyway** for `CodexU.app`, then confirm
 with Touch ID or your password. Finder right-click > **Open** also shows the
 manual allow prompt.
 
@@ -169,7 +169,7 @@ make notarize \
 ```sh
 hdiutil verify dist/*.dmg
 hdiutil attach dist/*.dmg
-codesign --verify --deep --strict "/Volumes/codexU/codexU.app"
+codesign --verify --deep --strict "/Volumes/CodexU/CodexU.app"
 ```
 
 For notarized releases, also run:

@@ -195,7 +195,7 @@ private struct PaletteArtworkCard: View {
 
     private var sourceLabel: String {
         let source = descriptor.isOfficial
-            ? language.text("codexU 精选", "codexU Curated")
+            ? language.text("CodexU 精选", "CodexU Curated")
             : language.text("社区贡献 · \(descriptor.authorName)", "Community · \(descriptor.authorName)")
         if descriptor.lifecycle == .deprecated {
             return language.text("已弃用 · \(source)", "Deprecated · \(source)")

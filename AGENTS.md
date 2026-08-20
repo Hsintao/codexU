@@ -79,7 +79,7 @@ UI 改动必须遵守 `docs/DESIGN_SYSTEM.md`。
 ```sh
 make build
 make probe
-build/codexU.app/Contents/MacOS/codexU --dump-json
+build/CodexU.app/Contents/MacOS/CodexU --dump-json
 git diff --check
 ```
 
@@ -111,8 +111,8 @@ Windows 原生采集使用真实 exact HWND 和当前屏幕/DPI，不用浏览�
 本地启动：
 
 ```sh
-osascript -e 'quit app "codexU"' >/dev/null 2>&1 || true
-open "build/codexU.app"
+osascript -e 'quit app "CodexU"' >/dev/null 2>&1 || true
+open "build/CodexU.app"
 ```
 
 ## 发布原则

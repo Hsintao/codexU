@@ -1,5 +1,6 @@
-APP_NAME := codexU
-DISPLAY_NAME := codexU
+APP_NAME := CodexU
+DISPLAY_NAME := CodexU
+ARTIFACT_NAME := codexU
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist 2>/dev/null || echo 0.1.0)
 BUILD_DIR := build
 DIST_DIR := dist
@@ -15,7 +16,7 @@ APPLE_SILICON_TARGET_TRIPLE ?= arm64-apple-macos$(DEPLOYMENT_TARGET)
 INTEL_TARGET_TRIPLE ?= x86_64-apple-macos$(DEPLOYMENT_TARGET)
 TARGET_TRIPLE ?= $(HOST_ARCH)-apple-macos$(DEPLOYMENT_TARGET)
 ARCH_NAME := $(shell echo "$(TARGET_TRIPLE)" | sed -E 's/-apple-macos.*//')
-DMG_NAME := $(APP_NAME)-$(VERSION)-mac-$(ARCH_NAME).dmg
+DMG_NAME := $(ARTIFACT_NAME)-$(VERSION)-mac-$(ARCH_NAME).dmg
 DMG_PATH := $(DIST_DIR)/$(DMG_NAME)
 SIGN_IDENTITY ?= -
 CODESIGN_EXTRA_FLAGS ?=

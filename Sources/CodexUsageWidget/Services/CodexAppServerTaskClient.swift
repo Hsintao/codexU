@@ -224,7 +224,7 @@ final class CodexAppServerTaskClient: CodexTaskEventClient {
             "params": [
                 "clientInfo": [
                     "name": "codexu",
-                    "title": "codexU",
+                    "title": "CodexU",
                     "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
                 ],
                 "capabilities": [

@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 OUTPUT_DIR="${CODEXU_PHASE_ONE_OUTPUT_DIR:-$ROOT_DIR/build/phase-one}"
-BIN="$ROOT_DIR/build/codexU.app/Contents/MacOS/codexU"
+BIN="$ROOT_DIR/build/CodexU.app/Contents/MacOS/CodexU"
 DURATION_SECONDS="${DURATION_SECONDS:-28800}"
 SAMPLE_INTERVAL_SECONDS="${SAMPLE_INTERVAL_SECONDS:-60}"
 mkdir -p "$OUTPUT_DIR"

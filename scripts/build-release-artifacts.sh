@@ -19,14 +19,14 @@ git diff --check
 make test-macos-compatibility
 make build >/dev/null
 CODEXU_SKIP_BUILD=1 ./scripts/test-history-index.sh
-build/codexU.app/Contents/MacOS/codexU --self-test-statistics-time-zone
-build/codexU.app/Contents/MacOS/codexU --self-test-token-counter
-build/codexU.app/Contents/MacOS/codexU --self-test-app-server-pipe
-build/codexU.app/Contents/MacOS/codexU --self-test-claude-skill-paths
-build/codexU.app/Contents/MacOS/codexU --self-test-status-item
-build/codexU.app/Contents/MacOS/codexU --self-test-rate-limits
-build/codexU.app/Contents/MacOS/codexU --self-test-particle-animation
-build/codexU.app/Contents/MacOS/codexU --self-test-updates
+build/CodexU.app/Contents/MacOS/CodexU --self-test-statistics-time-zone
+build/CodexU.app/Contents/MacOS/CodexU --self-test-token-counter
+build/CodexU.app/Contents/MacOS/CodexU --self-test-app-server-pipe
+build/CodexU.app/Contents/MacOS/CodexU --self-test-claude-skill-paths
+build/CodexU.app/Contents/MacOS/CodexU --self-test-status-item
+build/CodexU.app/Contents/MacOS/CodexU --self-test-rate-limits
+build/CodexU.app/Contents/MacOS/CodexU --self-test-particle-animation
+build/CodexU.app/Contents/MacOS/CodexU --self-test-updates
 ./scripts/test-parsers.sh
 
 make release-all
@@ -45,8 +45,8 @@ verify_asset() {
 
   mount_dir="$(mktemp -d)"
   hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$dmg" >/dev/null
-  file "$mount_dir/codexU.app/Contents/MacOS/codexU" | grep -q "$expected_arch"
-  codesign --verify --deep --strict "$mount_dir/codexU.app"
+  file "$mount_dir/CodexU.app/Contents/MacOS/CodexU" | grep -q "$expected_arch"
+  codesign --verify --deep --strict "$mount_dir/CodexU.app"
   hdiutil detach "$mount_dir" >/dev/null
   rmdir "$mount_dir"
 }

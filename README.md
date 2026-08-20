@@ -117,12 +117,12 @@ API 等效价值 =
 
 codexU 目前通过 GitHub Release 的 DMG 安装包分发，不经过 Mac App Store。第一次打开时，macOS 可能会拦截，需要手动允许：
 
-1. 打开 `codexU.app` 一次。如果系统提示无法打开，先取消弹窗。
+1. 打开 `CodexU.app` 一次。如果系统提示无法打开，先取消弹窗。
 2. 打开 **系统设置 > 隐私与安全性**。
-3. 在 **安全性** 区域找到 `codexU.app`，点击 **仍要打开**。
+3. 在 **安全性** 区域找到 `CodexU.app`，点击 **仍要打开**。
 4. 使用 Touch ID 或密码确认，然后点击 **打开**。
 
-也可以在 Finder 中右键点击 `codexU.app`，选择 **打开**，再确认系统安全提示。
+也可以在 Finder 中右键点击 `CodexU.app`，选择 **打开**，再确认系统安全提示。
 
 codexU 需要读取本机 `~/.codex/` 下的 Codex 数据；如果启用 Claude Code 统计，还会读取 `~/.claude/` 下的本机 transcript、任务和状态缓存。如果 macOS 弹出文件或文件夹访问授权，请允许访问，否则小组件无法读取本机 usage、线程和自动化任务信息。
 
@@ -134,7 +134,7 @@ codexU 需要读取本机 `~/.codex/` 下的 Codex 数据；如果启用 Claude 
 - Intel：`codexU-<version>-mac-x86_64.dmg`
 
 1. 打开 DMG。
-2. 将 `codexU.app` 拖到 `Applications` 文件夹。
+2. 将 `CodexU.app` 拖到 `Applications` 文件夹。
 3. 从 `Applications` 打开 codexU。
 4. 按上面的 **首次安装：隐私与安全** 步骤完成手动放行。
 

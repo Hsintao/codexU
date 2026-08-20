@@ -113,7 +113,7 @@ struct RuntimeStatusMenuView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text("codexU")
+                Text("CodexU")
                     .font(.system(size: 14, weight: .semibold))
                 Text(store.homeStatusText(kind: .quota, language: language))
                     .font(.system(size: 10, weight: .medium))

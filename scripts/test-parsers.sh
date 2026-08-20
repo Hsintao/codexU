@@ -38,7 +38,7 @@ OUTPUT="$TMP_DIR/out.json"
 CODEXU_HOME_OVERRIDE="$TMP_DIR" \
 CODEXU_CACHE_OVERRIDE="$CACHE_DIR" \
 CODEXU_RUNTIME_FILTER="claude-code" \
-  build/codexU.app/Contents/MacOS/codexU --dump-json > "$OUTPUT"
+  build/CodexU.app/Contents/MacOS/CodexU --dump-json > "$OUTPUT"
 
 grep -q '"schemaVersion" : 2' "$OUTPUT"
 grep -q '"id" : "claude-code"' "$OUTPUT"
@@ -76,7 +76,7 @@ MIGRATED_OUTPUT="$TMP_DIR/out-migrated.json"
 CODEXU_HOME_OVERRIDE="$TMP_DIR" \
 CODEXU_CACHE_OVERRIDE="$CACHE_DIR" \
 CODEXU_RUNTIME_FILTER="claude-code" \
-  build/codexU.app/Contents/MacOS/codexU --dump-json > "$MIGRATED_OUTPUT"
+  build/CodexU.app/Contents/MacOS/CodexU --dump-json > "$MIGRATED_OUTPUT"
 
 grep -q '"visibleTotalTokens" : 1900' "$MIGRATED_OUTPUT"
 grep -q '"version":2' "$CACHE_FILE"
@@ -88,7 +88,7 @@ WARM_OUTPUT="$TMP_DIR/out-warm.json"
 CODEXU_HOME_OVERRIDE="$TMP_DIR" \
 CODEXU_CACHE_OVERRIDE="$CACHE_DIR" \
 CODEXU_RUNTIME_FILTER="claude-code" \
-  build/codexU.app/Contents/MacOS/codexU --dump-json > "$WARM_OUTPUT"
+  build/CodexU.app/Contents/MacOS/CodexU --dump-json > "$WARM_OUTPUT"
 
 grep -q '"visibleTotalTokens" : 1900' "$WARM_OUTPUT"
 test "$FIRST_CACHE_MTIME" = "$(stat -f %m "$CACHE_FILE")"
