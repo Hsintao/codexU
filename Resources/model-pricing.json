@@ -1,0 +1,498 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-10-11",
+  "referenceModel": "gpt-5.5",
+  "unit": "USD per 1M tokens",
+  "models": [
+    {
+      "model": "gpt-6.1-sol",
+      "aliases": [],
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.1,
+      "cacheWriteInputPerMillion": 2.5,
+      "outputPerMillion": 10,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2,
+        "batch": 0.5,
+        "flex": 0.5,
+        "ultrafast": 6
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": true,
+      "usesReferencePricing": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    },
+    {
+      "model": "gpt-6-sol",
+      "aliases": [],
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "cacheWriteInputPerMillion": 2.5,
+      "outputPerMillion": 10,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2,
+        "batch": 0.5,
+        "flex": 0.5
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": true,
+      "usesReferencePricing": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-sol"
+    },
+    {
+      "model": "gpt-6-astra",
+      "aliases": [],
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 1,
+      "cacheWriteInputPerMillion": 12.5,
+      "outputPerMillion": 50,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2,
+        "batch": 0.5,
+        "flex": 0.5,
+        "ultrafast": 6
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": true,
+      "usesReferencePricing": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra"
+    },
+    {
+      "model": "gpt-6-luna",
+      "aliases": [],
+      "inputPerMillion": 0.1,
+      "cachedInputPerMillion": 0.01,
+      "cacheWriteInputPerMillion": 0.125,
+      "outputPerMillion": 0.5,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2,
+        "batch": 0.5,
+        "flex": 0.5
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": true,
+      "usesReferencePricing": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna"
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "aliases": [
+        "gpt-5.6"
+      ],
+      "inputPerMillion": 4,
+      "cachedInputPerMillion": 0.4,
+      "cacheWriteInputPerMillion": 5,
+      "outputPerMillion": 20,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "aliases": [],
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "cacheWriteInputPerMillion": 2.5,
+      "outputPerMillion": 12,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "aliases": [],
+      "inputPerMillion": 0.2,
+      "cachedInputPerMillion": 0.02,
+      "cacheWriteInputPerMillion": 0.25,
+      "outputPerMillion": 1.2,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.5-pro",
+      "aliases": [],
+      "inputPerMillion": 30,
+      "cachedInputPerMillion": 30,
+      "cacheWriteInputPerMillion": 30,
+      "outputPerMillion": 180,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.5",
+      "aliases": [
+        "chat-latest"
+      ],
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "cacheWriteInputPerMillion": 5,
+      "outputPerMillion": 30,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2.5,
+        "fast": 2.5
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "aliases": [],
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "cacheWriteInputPerMillion": 0.75,
+      "outputPerMillion": 4.5,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.4-nano",
+      "aliases": [],
+      "inputPerMillion": 0.2,
+      "cachedInputPerMillion": 0.02,
+      "cacheWriteInputPerMillion": 0.2,
+      "outputPerMillion": 1.25,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.4-pro",
+      "aliases": [],
+      "inputPerMillion": 30,
+      "cachedInputPerMillion": 30,
+      "cacheWriteInputPerMillion": 30,
+      "outputPerMillion": 180,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.4",
+      "aliases": [],
+      "inputPerMillion": 2.5,
+      "cachedInputPerMillion": 0.25,
+      "cacheWriteInputPerMillion": 2.5,
+      "outputPerMillion": 15,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2
+      },
+      "longContextThreshold": 272000,
+      "longContextInputMultiplier": 2,
+      "longContextOutputMultiplier": 1.5,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "aliases": [],
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "cacheWriteInputPerMillion": 5,
+      "outputPerMillion": 30,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": true,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.3-codex",
+      "aliases": [],
+      "inputPerMillion": 1.75,
+      "cachedInputPerMillion": 0.175,
+      "cacheWriteInputPerMillion": 1.75,
+      "outputPerMillion": 14,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1,
+        "priority": 2,
+        "fast": 2
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5.2-codex",
+      "aliases": [
+        "gpt-5.2",
+        "gpt-5.3-chat"
+      ],
+      "inputPerMillion": 1.75,
+      "cachedInputPerMillion": 0.175,
+      "cacheWriteInputPerMillion": 1.75,
+      "outputPerMillion": 14,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-5",
+      "aliases": [
+        "gpt-5-codex"
+      ],
+      "inputPerMillion": 1.25,
+      "cachedInputPerMillion": 0.125,
+      "cacheWriteInputPerMillion": 1.25,
+      "outputPerMillion": 10,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-4o",
+      "aliases": [],
+      "inputPerMillion": 2.5,
+      "cachedInputPerMillion": 1.25,
+      "cacheWriteInputPerMillion": 2.5,
+      "outputPerMillion": 10,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-4",
+      "aliases": [],
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 5,
+      "cacheWriteInputPerMillion": 10,
+      "outputPerMillion": 30,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "gpt-3.5-turbo",
+      "aliases": [
+        "gpt-3.5",
+        "gpt-35"
+      ],
+      "inputPerMillion": 0.5,
+      "cachedInputPerMillion": 0,
+      "cacheWriteInputPerMillion": 0.5,
+      "outputPerMillion": 1.5,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "claude-opus",
+      "aliases": [
+        "claude-3-opus"
+      ],
+      "inputPerMillion": 15,
+      "cachedInputPerMillion": 1.5,
+      "cacheWriteInputPerMillion": 1.5,
+      "outputPerMillion": 75,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": true,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "claude-sonnet",
+      "aliases": [
+        "claude-3-sonnet",
+        "claude-3-5-sonnet",
+        "claude-3-7-sonnet"
+      ],
+      "inputPerMillion": 3,
+      "cachedInputPerMillion": 0.3,
+      "cacheWriteInputPerMillion": 0.3,
+      "outputPerMillion": 15,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": true,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "claude-haiku",
+      "aliases": [
+        "claude-3-haiku",
+        "claude-3-5-haiku"
+      ],
+      "inputPerMillion": 0.8,
+      "cachedInputPerMillion": 0.08,
+      "cacheWriteInputPerMillion": 0.08,
+      "outputPerMillion": 4,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": true,
+      "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    }
+  ]
+}

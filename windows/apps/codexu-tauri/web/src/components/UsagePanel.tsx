@@ -61,7 +61,7 @@ export function UsagePanel({ usage }: UsagePanelProps) {
         <Coins size={15} aria-hidden="true" />
         {detailed ? (
           <span>
-            {t('usage.estimate', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })}
+            {t(detailed.lifetime.uses_reference_pricing ? 'usage.referenceEstimate' : 'usage.estimate', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })}
           </span>
         ) : (
           <span>{t('usage.estimateUnavailable')}</span>

@@ -20,6 +20,7 @@ pub(crate) struct ParserState {
     pub cumulative: Option<TokenBreakdown>,
     pub started_tasks: HashMap<String, DateTime<Utc>>,
     pub parent_id: Option<String>,
+    pub service_tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,7 @@ impl ParserState {
             cumulative: None,
             started_tasks: HashMap::new(),
             parent_id: None,
+            service_tier: None,
         }
     }
 
@@ -103,13 +105,16 @@ impl ParserState {
                 self.parent_id = codex_string_value(payload.get("forked_from_id"));
             }
             Some("turn_context") => {
+                if payload.get("service_tier").is_some() {
+                    self.service_tier = codex_string_value(payload.get("service_tier"));
+                }
                 if let Some(cwd) = codex_string_value(payload.get("cwd")) {
                     self.summary.project_path = cwd;
                 }
                 if let Some(model) = codex_string_value(payload.get("model")) {
                     self.summary.model = Some(model.clone());
                     if let Some(turn) = codex_string_value(payload.get("turn_id")) {
-                        db.execute("INSERT INTO turn_model(source,byte_offset,turn_id,model) VALUES(?1,?2,?3,?4)",params![source,offset,turn,model])?;
+                        db.execute("INSERT INTO turn_model(source,byte_offset,turn_id,model,service_tier) VALUES(?1,?2,?3,?4,?5)",params![source,offset,turn,model,self.service_tier])?;
                     }
                 }
             }
@@ -144,6 +149,16 @@ impl ParserState {
                         self.started_tasks.insert(turn, start);
                         if self.started_tasks.len() > 1024 {
                             return Err(HistoryReadError::ResourceLimited.into());
+                        }
+                    }
+                }
+                Some("thread_settings_applied") => {
+                    self.service_tier = payload
+                        .get("thread_settings")
+                        .and_then(|v| codex_string_value(v.get("service_tier")));
+                    if let Some(turn) = codex_string_value(payload.get("turn_id")) {
+                        if let Some(model) = self.summary.model.as_ref() {
+                            db.execute("INSERT INTO turn_model(source,byte_offset,turn_id,model,service_tier) VALUES(?1,?2,?3,?4,?5)", params![source,offset,turn,model,self.service_tier])?;
                         }
                     }
                 }
@@ -187,17 +202,21 @@ impl ParserState {
                         return Ok(());
                     };
                     let turn = codex_string_value(payload.get("turn_id"));
-                    let model = if let Some(ref turn) = turn {
-                        db.query_row("SELECT model FROM turn_model WHERE source=?1 AND turn_id=?2 AND byte_offset<=?3 ORDER BY byte_offset DESC LIMIT 1",params![source,turn,offset],|r|r.get::<_,String>(0)).optional()?.or_else(||self.summary.model.clone())
+                    let context = if let Some(ref turn) = turn {
+                        db.query_row("SELECT model,service_tier FROM turn_model WHERE source=?1 AND turn_id=?2 AND byte_offset<=?3 ORDER BY byte_offset DESC LIMIT 1", params![source,turn,offset], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).optional()?
                     } else {
-                        self.summary.model.clone()
+                        None
                     };
+                    let (model, service_tier) = context
+                        .map(|(m, t)| (Some(m), t))
+                        .unwrap_or_else(|| (self.summary.model.clone(), self.service_tier.clone()));
                     let signature = serde_json::to_string(&(
                         counter_identity(cumulative),
                         counter_identity(last),
                     ))?;
                     let key = format!("usage:{timestamp}:{turn:?}:{signature}");
                     let delta = CodexUsageDelta {
+                        service_tier,
                         turn_id: Some(key.clone()),
                         date: timestamp,
                         tokens,
@@ -245,6 +264,7 @@ fn counter_identity(value: Option<&Value>) -> Vec<Option<i64>> {
     [
         "input_tokens",
         "cached_input_tokens",
+        "cache_write_input_tokens",
         "output_tokens",
         "reasoning_output_tokens",
         "total_tokens",
@@ -263,6 +283,9 @@ fn sample(value: &Value, previous: &TokenBreakdown) -> Option<TokenBreakdown> {
     let output = number(value, "output_tokens").unwrap_or(previous.output_tokens);
     Some(TokenBreakdown {
         input_tokens: input,
+        cache_write_input_tokens: number(value, "cache_write_input_tokens")
+            .unwrap_or(previous.cache_write_input_tokens)
+            .min(input),
         cached_input_tokens: number(value, "cached_input_tokens")
             .unwrap_or(previous.cached_input_tokens)
             .min(input),
@@ -297,6 +320,9 @@ fn normalize_counter(
         return last.or(Some(observed)).filter(|v| !v.is_zero());
     }
     let high = TokenBreakdown {
+        cache_write_input_tokens: previous
+            .cache_write_input_tokens
+            .max(observed.cache_write_input_tokens),
         input_tokens: previous.input_tokens.max(observed.input_tokens),
         cached_input_tokens: previous
             .cached_input_tokens
@@ -311,6 +337,9 @@ fn normalize_counter(
     let output = (high.output_tokens - previous.output_tokens).min(total);
     let input = (high.input_tokens - previous.input_tokens).min(total - output);
     let delta = TokenBreakdown {
+        cache_write_input_tokens: (high.cache_write_input_tokens
+            - previous.cache_write_input_tokens)
+            .min(input),
         input_tokens: input,
         cached_input_tokens: (high.cached_input_tokens - previous.cached_input_tokens).min(input),
         output_tokens: output,

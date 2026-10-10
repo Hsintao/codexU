@@ -15,6 +15,7 @@ pub enum UsageSourceQuality {
 pub struct TokenBreakdown {
     pub input_tokens: i64,
     pub cached_input_tokens: i64,
+    pub cache_write_input_tokens: i64,
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
@@ -24,6 +25,7 @@ impl TokenBreakdown {
     pub const ZERO: Self = Self {
         input_tokens: 0,
         cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
         output_tokens: 0,
         reasoning_output_tokens: 0,
         total_tokens: 0,
@@ -55,6 +57,7 @@ impl TokenBreakdown {
     pub fn is_zero(&self) -> bool {
         self.input_tokens == 0
             && self.cached_input_tokens == 0
+            && self.cache_write_input_tokens == 0
             && self.output_tokens == 0
             && self.reasoning_output_tokens == 0
             && self.total_tokens == 0
@@ -63,6 +66,7 @@ impl TokenBreakdown {
     pub fn add(&mut self, other: &Self) {
         self.input_tokens += other.input_tokens;
         self.cached_input_tokens += other.cached_input_tokens;
+        self.cache_write_input_tokens += other.cache_write_input_tokens;
         self.output_tokens += other.output_tokens;
         self.reasoning_output_tokens += other.reasoning_output_tokens;
         self.total_tokens += other.total_tokens;
@@ -74,17 +78,24 @@ impl TokenBreakdown {
 pub struct PricedTokenUsage {
     pub tokens: TokenBreakdown,
     pub estimated_cost_usd: f64,
+    pub uses_reference_pricing: bool,
 }
 
 impl PricedTokenUsage {
     pub const ZERO: Self = Self {
         tokens: TokenBreakdown::ZERO,
         estimated_cost_usd: 0.0,
+        uses_reference_pricing: false,
     };
 
-    pub fn add_tokens(&mut self, tokens: &TokenBreakdown, cost_usd: f64) {
+    pub fn add_tokens(
+        &mut self,
+        tokens: &TokenBreakdown,
+        estimate: crate::model_pricing::CostEstimate,
+    ) {
         self.tokens.add(tokens);
-        self.estimated_cost_usd += cost_usd;
+        self.estimated_cost_usd += estimate.usd;
+        self.uses_reference_pricing |= estimate.uses_reference_pricing;
     }
 }
 

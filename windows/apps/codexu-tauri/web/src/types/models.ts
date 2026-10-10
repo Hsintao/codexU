@@ -1,6 +1,7 @@
 export interface TokenBreakdown {
   input_tokens: number;
   cached_input_tokens: number;
+  cache_write_input_tokens: number;
   output_tokens: number;
   reasoning_output_tokens: number;
   total_tokens: number;
@@ -9,6 +10,7 @@ export interface TokenBreakdown {
 export interface PricedTokenUsage {
   tokens: TokenBreakdown;
   estimated_cost_usd: number;
+  uses_reference_pricing: boolean;
 }
 
 export interface DetailedUsage {

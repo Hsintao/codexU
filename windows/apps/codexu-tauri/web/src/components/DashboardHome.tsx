@@ -98,7 +98,7 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.today_tokens ?? null : null)}
             subValue={
               detailed
-                ? t('dashboard.metrics.estimated', { value: formatUSD(detailed.today.estimated_cost_usd) })
+                ? t(detailed.today.uses_reference_pricing ? 'dashboard.metrics.referenceEstimated' : 'dashboard.metrics.estimated', { value: formatUSD(detailed.today.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
             icon={<Activity size={16} />}
@@ -110,7 +110,7 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.seven_day_tokens ?? null : null)}
             subValue={
               detailed
-                ? t('dashboard.metrics.estimated', { value: formatUSD(detailed.seven_day.estimated_cost_usd) })
+                ? t(detailed.seven_day.uses_reference_pricing ? 'dashboard.metrics.referenceEstimated' : 'dashboard.metrics.estimated', { value: formatUSD(detailed.seven_day.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
             icon={<Calendar size={16} />}
@@ -122,7 +122,7 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.lifetime_tokens ?? null : null)}
             subValue={
               detailed
-                ? t('dashboard.metrics.estimated', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })
+                ? t(detailed.lifetime.uses_reference_pricing ? 'dashboard.metrics.referenceEstimated' : 'dashboard.metrics.estimated', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
             icon={<TrendingUp size={16} />}

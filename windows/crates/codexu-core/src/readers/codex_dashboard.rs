@@ -662,11 +662,13 @@ mod tests {
                 last_active_at: Some(now),
                 created_at: Some(now),
                 deltas: vec![UsageDelta {
+                    service_tier: None,
                     message_id: Some("turn-1".to_string()),
                     date: now,
                     tokens: TokenBreakdown {
                         input_tokens: 10,
                         cached_input_tokens: 0,
+                        cache_write_input_tokens: 0,
                         output_tokens: 5,
                         reasoning_output_tokens: 0,
                         total_tokens: 15,
