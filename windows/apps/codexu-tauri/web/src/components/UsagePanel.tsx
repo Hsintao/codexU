@@ -18,8 +18,7 @@ export function UsagePanel({ usage }: UsagePanelProps) {
     <section className="space-y-4 usage-panel" aria-label={t('usage.localRecords')}>
       <div className="glass-panel p-4 sm:p-5 usage-panel-heading">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-tertiary">{t('usage.title')}</p>
-          <h2 className="mt-1 text-lg font-semibold text-primary">{t('usage.localTokenActivity')}</h2>
+          <h2 className="text-sm font-semibold text-primary">{t('usage.title')}</h2>
         </div>
         <div className="usage-panel-source">
           <span className="usage-source-chip">{sourceQualityLabel(trend?.source_quality, t)}</span>
