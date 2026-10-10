@@ -33,6 +33,87 @@ fn setup(root: &Path) -> std::path::PathBuf {
     sessions.join("rollout-a.jsonl")
 }
 
+fn large_output(file: &Path, tail: &[u8]) {
+    let mut out = std::fs::OpenOptions::new().append(true).open(file).unwrap();
+    out.write_all(br#"{"timestamp":"2026-10-10T00:00:01Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":[{"type":"input_image","image_url":"data:image/png;base64,"#).unwrap();
+    let chunk = [b'A'; 64 * 1024];
+    for _ in 0..256 {
+        out.write_all(&chunk).unwrap();
+    }
+    out.write_all(tail).unwrap();
+}
+
+#[tokio::test]
+async fn large_image_output_preserves_full_counts_and_recovers_unterminated_append() {
+    let temp = tempdir().unwrap();
+    let file = setup(temp.path());
+    let cache = temp.path().join("cache");
+    std::fs::write(&file, meta("large", None) + &event("a", 100, 100)).unwrap();
+    large_output(&file, b"\"}]}}");
+    let reader = CodexTranscriptReader::new(&cache);
+    for _ in 0..2 {
+        assert_eq!(
+            reader
+                .load_local_usage(temp.path(), Utc::now())
+                .await
+                .unwrap()
+                .unwrap()
+                .lifetime_tokens,
+            100
+        );
+    }
+    let mut out = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap();
+    out.write_all(("\n".to_owned() + &event("b", 200, 300)).as_bytes())
+        .unwrap();
+    drop(out);
+    assert_eq!(
+        reader
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .lifetime_tokens,
+        300
+    );
+    assert_eq!(
+        reader
+            .with_integrity_scan()
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .lifetime_tokens,
+        300
+    );
+}
+
+#[tokio::test]
+async fn malformed_large_image_output_does_not_publish_partial_history() {
+    let temp = tempdir().unwrap();
+    let file = setup(temp.path());
+    let cache = temp.path().join("cache");
+    std::fs::write(&file, meta("large", None) + &event("a", 100, 100)).unwrap();
+    let reader = CodexTranscriptReader::new(&cache);
+    reader
+        .load_local_usage(temp.path(), Utc::now())
+        .await
+        .unwrap();
+    let generation = metrics(&cache).published_generation;
+    large_output(&file, b"\"}] INVALID}\n");
+    let error = reader
+        .load_local_usage(temp.path(), Utc::now())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<HistoryReadError>(),
+        Some(HistoryReadError::InvalidRecord)
+    ));
+    assert_eq!(metrics(&cache).published_generation, generation);
+}
+
 #[tokio::test]
 async fn multiple_model_calls_in_one_turn_and_cumulative_only_history_are_counted_as_deltas() {
     let temp = tempdir().unwrap();
