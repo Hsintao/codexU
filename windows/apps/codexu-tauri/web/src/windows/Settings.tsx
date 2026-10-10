@@ -204,7 +204,6 @@ export function Settings() {
                 <Palette size={14} />
                 <span>{t('settings.palette')}</span>
               </div>
-              <p className="text-xs text-tertiary mb-3">{t('settings.paletteDescription')}</p>
               <div className="grid grid-cols-2 gap-2">
                 {PALETTE_CATALOG.map((palette) => {
                   const selected = config.palette_id === palette.id;
