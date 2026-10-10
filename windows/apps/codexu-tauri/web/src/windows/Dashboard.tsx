@@ -94,7 +94,7 @@ export function Dashboard() {
         <div className="max-w-6xl mx-auto w-full space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <RefreshStatus status={status} />
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto">
               {localUsage ? <span className="text-xs text-tertiary">{t('dashboard.status.threads', { count: localUsage.thread_count })}</span> : null}
               {!localUsage ? (
                 <span className="text-xs text-tertiary">

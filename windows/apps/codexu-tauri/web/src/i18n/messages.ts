@@ -31,7 +31,7 @@ const en = {
   dashboard: {
     refresh: {
       quota: 'Quota', tasks: 'Tasks', history: 'History',
-      waiting: 'Waiting', loading: 'Loading', current: 'Up to date', empty: 'No records available',
+      waiting: 'Waiting', loading: 'Loading',
       restored: 'Showing saved summary', updatingRetained: 'Updating · showing previous data',
       updatingSummary: 'Updating · saved summary; details pending', failedSummary: 'Refresh failed · saved summary; details unavailable',
       failedRetained: 'Refresh failed · showing previous data', failed: 'Refresh failed · unavailable',
@@ -333,7 +333,7 @@ const zhHans: MessageShape<typeof en> = {
   dashboard: {
     refresh: {
       quota: '额度', tasks: '任务', history: '历史',
-      waiting: '等待刷新', loading: '正在读取', current: '已更新', empty: '暂无记录',
+      waiting: '等待刷新', loading: '正在读取',
       restored: '显示已保存摘要', updatingRetained: '正在更新 · 显示上次数据',
       updatingSummary: '正在更新 · 显示保存摘要，明细待读取', failedSummary: '刷新失败 · 显示保存摘要，明细暂不可用',
       failedRetained: '刷新失败 · 显示上次数据', failed: '刷新失败 · 暂不可用',
