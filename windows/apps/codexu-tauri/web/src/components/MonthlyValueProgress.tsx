@@ -65,10 +65,6 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
         ))}
       </div>
 
-      <div className="mt-1 text-xs text-tertiary">
-        {monthCost > 0 ? t('monthly.mapped') : t('monthly.noUsage')}
-      </div>
-
       <p className="mt-2 text-xs text-primary">
         <span className="inline-flex items-center gap-1.5">
           <BadgeDollarSign size={14} />

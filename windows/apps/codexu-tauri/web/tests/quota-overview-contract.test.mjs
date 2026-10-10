@@ -24,7 +24,6 @@ test('renders every returned official quota window and exposes a retryable first
   );
   assert.match(home, /<QuotaOverview snapshot=\{snapshot\} sourceLabel=\{quotaSourceLabel\} onRefresh=\{onQuotaRefresh\}/);
   assert.match(dashboard, /onQuotaRefresh=\{refresh\}/);
-  assert.match(dashboard, /const quotaStatusLabel/);
-  assert.match(dashboard, /dashboard\.status\.officialQuotaActive/);
+  assert.match(dashboard, /<RefreshStatus status=\{status\}/);
   assert.doesNotMatch(quota, /today_tokens|seven_day_tokens|lifetime_tokens/);
 });

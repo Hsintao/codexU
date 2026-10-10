@@ -115,6 +115,37 @@ async fn oversized_rollout_line_keeps_peak_allocation_bounded_and_parses_followi
     );
 
     drop(history);
+    // A valid image output must remain usable by the complete-history reader,
+    // while its body must not turn into a 48 MiB in-memory JSON value.
+    let mut image = File::create(&rollout).unwrap();
+    image.write_all(br#"{"timestamp":"2026-08-05T14:59:50Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"data:image/png;base64,"#).unwrap();
+    for _ in 0..(48 * 1024 / 64) {
+        image.write_all(&chunk).unwrap();
+    }
+    image.write_all(b"\"}}\n").unwrap();
+    image.write_all(br#"{"timestamp":"2026-08-05T15:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":40,"total_tokens":140}}}}
+"#).unwrap();
+    drop(image);
+    let image_baseline = CURRENT_BYTES.load(Ordering::Relaxed);
+    PEAK_BYTES.store(image_baseline, Ordering::Relaxed);
+    let image_usage = codexu_core::readers::CodexTranscriptReader::new(&cache)
+        .load_local_usage(
+            temp.path(),
+            Utc.with_ymd_and_hms(2026, 8, 5, 15, 0, 10).unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let image_growth = PEAK_BYTES
+        .load(Ordering::Relaxed)
+        .saturating_sub(image_baseline);
+    assert_eq!(image_usage.lifetime_tokens, 140);
+    assert!(
+        image_growth < 16 * 1024 * 1024,
+        "large image history allocated {image_growth} bytes"
+    );
+    eprintln!("large_image_history peak_growth_bytes={image_growth}");
+    drop(image_usage);
     let refresh_temp = tempdir().unwrap();
     let refresh_archived = refresh_temp.path().join("archived_sessions");
     let refresh_cache = refresh_temp.path().join("cache");
