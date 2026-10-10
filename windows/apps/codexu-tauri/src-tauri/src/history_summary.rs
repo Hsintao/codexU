@@ -34,7 +34,7 @@ pub fn load(directory: &Path, root: &Path, cache: &Path) -> Option<CodexDashboar
         return None;
     }
     let saved: Summary = serde_json::from_slice(&bytes).ok()?;
-    (saved.version == 2
+    (saved.version == 3
         && saved.pricing == codexu_core::model_pricing::catalog_fingerprint()
         && saved.root == root
         && saved.cache == cache
@@ -73,7 +73,7 @@ pub async fn save(
         }
     }
     let bytes = serde_json::to_vec(&Summary {
-        version: 2,
+        version: 3,
         pricing: codexu_core::model_pricing::catalog_fingerprint(),
         root: root.into(),
         cache: cache.into(),
@@ -117,6 +117,12 @@ mod tests {
         let path = directory.path().join(NAME);
         let mut value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["version"] = 2.into();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(load(directory.path(), &root, &cache).is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        value["version"] = 3.into();
         value["pricing"] = "obsolete-catalog".into();
         let bytes = serde_json::to_vec(&value).unwrap();
         std::fs::write(&path, &bytes).unwrap();

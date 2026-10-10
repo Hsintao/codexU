@@ -19,6 +19,6 @@ GPT-6 请求输入超过 272,000 时，整次输入及缓存费用乘 2，输出
 
 没有专属条目的模型按表内 GPT-5.5 参考价折算，并明确标注参考估算。未识别的服务层级按已知标准基准参考折算，不能冒充该层级的专属价格。Claude 的旧家族费率集中在共享表，并标记为参考价；本次没有重新核实各 Claude 版本的官方费率。区域处理、工具费等本地日志没有足够事实的项目不自动补收，因此估算不代表完整实际 API 账单。
 
-价格表字节摘要参与 macOS 费用投影与 Windows 启动摘要身份。Windows 日归档和仪表盘每次由 Token 事实重算；旧派生索引缺少缓存写入或服务层级字段时，在独占锁内丢弃并重建，不迁移旧派生金额。未知的更高 schema 版本保留并报错。真实日志不修改。
+价格表字节摘要参与 macOS 费用投影与 Windows 启动摘要身份。Windows 日归档和仪表盘每次由 Token 事实重算；设置事件按 turn ID 保留对应模型，交错 turn 不互相覆盖。旧派生索引缺少计费字段或使用旧模型归属规则时，在独占锁内丢弃并重建，不迁移旧派生金额；旧启动摘要同时失效。未知的更高 schema 版本保留并报错。真实日志不修改。
 
 共同算例在 `Resources/model-pricing-vectors.json`：Windows `cargo test -p codexu-core --test model_pricing`，macOS `codexU --self-test-model-pricing`。两端读取同样的输入、预期美元金额和参考标记，macOS 验证需真实 macOS runner。

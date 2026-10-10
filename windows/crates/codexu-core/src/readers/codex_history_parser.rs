@@ -157,7 +157,11 @@ impl ParserState {
                         .get("thread_settings")
                         .and_then(|v| codex_string_value(v.get("service_tier")));
                     if let Some(turn) = codex_string_value(payload.get("turn_id")) {
-                        if let Some(model) = self.summary.model.as_ref() {
+                        let model = db.query_row(
+                            "SELECT model FROM turn_model WHERE source=?1 AND turn_id=?2 AND byte_offset<?3 ORDER BY byte_offset DESC LIMIT 1",
+                            params![source,turn,offset], |r| r.get::<_,String>(0),
+                        ).optional()?;
+                        if let Some(model) = model {
                             db.execute("INSERT INTO turn_model(source,byte_offset,turn_id,model,service_tier) VALUES(?1,?2,?3,?4,?5)", params![source,offset,turn,model,self.service_tier])?;
                         }
                     }
