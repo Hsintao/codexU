@@ -343,24 +343,24 @@ private final class ClaudeCodeTranscriptReader {
 
         for delta in uniqueDeltas {
             let cost = claudeEstimatedCostUSD(tokens: delta.tokens, model: delta.model)
-            lifetime.add(tokens: delta.tokens, costUSD: cost)
+            lifetime.add(tokens: delta.tokens, costUSD: cost, usesReferencePricing: claudeModelPrice(for: delta.model).usesReferencePricing)
             if delta.date >= monthStart {
-                month.add(tokens: delta.tokens, costUSD: cost)
+                month.add(tokens: delta.tokens, costUSD: cost, usesReferencePricing: claudeModelPrice(for: delta.model).usesReferencePricing)
             }
             if delta.date >= sevenDayStart {
-                sevenDay.add(tokens: delta.tokens, costUSD: cost)
+                sevenDay.add(tokens: delta.tokens, costUSD: cost, usesReferencePricing: claudeModelPrice(for: delta.model).usesReferencePricing)
             }
             if delta.date >= previousSevenDayStart && delta.date < sevenDayStart {
-                previousSevenDay.add(tokens: delta.tokens, costUSD: cost)
+                previousSevenDay.add(tokens: delta.tokens, costUSD: cost, usesReferencePricing: claudeModelPrice(for: delta.model).usesReferencePricing)
             }
             if delta.date >= dayStart {
-                today.add(tokens: delta.tokens, costUSD: cost)
+                today.add(tokens: delta.tokens, costUSD: cost, usesReferencePricing: claudeModelPrice(for: delta.model).usesReferencePricing)
             }
 
             let bucketDate = calendar.startOfDay(for: delta.date)
             let key = statistics.dayKey(for: bucketDate)
             var dayUsage = dailyUsage[key]?.usage ?? .zero
-            dayUsage.add(tokens: delta.tokens, costUSD: cost)
+            dayUsage.add(tokens: delta.tokens, costUSD: cost, usesReferencePricing: claudeModelPrice(for: delta.model).usesReferencePricing)
             dailyUsage[key] = (bucketDate, dayUsage)
 
             let projectPath = delta.projectPath.isEmpty ? "Claude Code" : delta.projectPath
@@ -398,9 +398,9 @@ private final class ClaudeCodeTranscriptReader {
         let toolUsages = makeToolUsages(from: summaries, lifetime: lifetime)
         let skillUsages = makeSkillUsages(from: summaries, context: context)
 
-        let unknownModelCount = uniqueDeltas.filter { claudeModelPrice(for: $0.model) == nil }.count
+        let unknownModelCount = uniqueDeltas.filter { claudeModelPrice(for: $0.model).usesReferencePricing }.count
         if unknownModelCount > 0 {
-            messages.append("部分 Claude Code 模型没有内置价格，价值估算只包含可识别模型")
+            messages.append("部分 Claude Code 用量按参考费率折算，估算不代表实际账单")
         }
 
         return LocalUsage(
@@ -1016,12 +1016,6 @@ struct ClaudeSkillLoad: Codable {
     let date: Date?
 }
 
-private struct ClaudeModelPrice {
-    let inputPerMillion: Double
-    let cachedInputPerMillion: Double
-    let outputPerMillion: Double
-}
-
 private struct ClaudeProjectAccumulator {
     let path: String
     var tokens = TokenBreakdown.zero
@@ -1181,28 +1175,13 @@ private func inferClaudeProjectPath(from file: URL) -> String {
     return encoded.replacingOccurrences(of: "-", with: "/")
 }
 
-private func claudeModelPrice(for model: String?) -> ClaudeModelPrice? {
-    let normalized = (model ?? "").lowercased()
-    guard !normalized.isEmpty else { return nil }
-
-    if normalized.contains("opus") {
-        return ClaudeModelPrice(inputPerMillion: 15, cachedInputPerMillion: 1.5, outputPerMillion: 75)
-    }
-    if normalized.contains("sonnet") {
-        return ClaudeModelPrice(inputPerMillion: 3, cachedInputPerMillion: 0.3, outputPerMillion: 15)
-    }
-    if normalized.contains("haiku") {
-        return ClaudeModelPrice(inputPerMillion: 0.8, cachedInputPerMillion: 0.08, outputPerMillion: 4)
-    }
-    return nil
+private func claudeModelPrice(for model: String?) -> ModelTokenPrice {
+    ModelPricingCatalog.shared.price(for: model)
 }
 
 private func claudeEstimatedCostUSD(tokens: TokenBreakdown, model: String?) -> Double {
-    guard let price = claudeModelPrice(for: model) else { return 0 }
-    let uncachedInputCost = Double(tokens.uncachedInputTokens) / 1_000_000 * price.inputPerMillion
-    let cachedInputCost = Double(tokens.billableCachedInputTokens) / 1_000_000 * price.cachedInputPerMillion
-    let outputCost = Double(max(tokens.outputTokens, 0)) / 1_000_000 * price.outputPerMillion
-    return uncachedInputCost + cachedInputCost + outputCost
+    claudeModelPrice(for: model).estimate(input: tokens.inputTokens, cached: tokens.cachedInputTokens,
+        write: tokens.cacheWriteInputTokens, output: tokens.outputTokens, serviceTier: nil)
 }
 
 private func claudeDayKey(_ date: Date, calendar: Calendar = .current) -> String {
@@ -1415,7 +1394,7 @@ enum ClaudeIncrementalAdapter {
 
 func priceArchivedClaude(tokens: TokenBreakdown, model: String?) -> PricedTokenUsage {
     PricedTokenUsage(tokens: tokens, estimatedCostUSD: claudeEstimatedCostUSD(tokens: tokens, model: model),
-                    usesReferencePricing: claudeModelPrice(for: model) == nil)
+                    usesReferencePricing: claudeModelPrice(for: model).usesReferencePricing)
 }
 
 
