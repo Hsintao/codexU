@@ -1,14 +1,16 @@
-use std::{env, net::Ipv4Addr, path::PathBuf, process::Stdio, time::Duration};
+use std::{env, path::PathBuf, process::Stdio, time::Duration};
 
 use chrono::{TimeZone, Utc};
-use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::{
-    net::{TcpListener, TcpStream},
-    process::{Child, Command},
-    time::{sleep, timeout, Instant},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
+    process::{Child, ChildStdin, ChildStdout, Command},
+    time::timeout,
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+
+#[cfg(windows)]
+#[path = "quota_process.rs"]
+mod quota_process;
 
 use crate::models::{AccountInfo, RateWindow};
 
@@ -16,8 +18,8 @@ const FIVE_HOUR_DURATION_MINS: i64 = 300;
 const SEVEN_DAY_DURATION_MINS: i64 = 10_080;
 const MONTHLY_MIN_DURATION_MINS: i64 = 28 * 24 * 60;
 const MONTHLY_MAX_DURATION_MINS: i64 = 31 * 24 * 60;
-const APP_SERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const APP_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
+const APP_SERVER_EXIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -125,51 +127,62 @@ pub trait AppServerTransport {
     async fn notify(&mut self, notification: Value) -> anyhow::Result<()>;
 }
 
-/// Reads the installed Codex CLI through a short-lived loopback-only
-/// app-server. The API calls themselves are read-only account lookups.
+/// Reads official quota through a private stdio app-server. Plugin startup is
+/// disabled for this child only; it must never update the user's marketplaces.
 pub async fn read_installed_codex_quota() -> anyhow::Result<CodexAppServerQuotaSnapshot> {
-    let port = reserve_loopback_port().await?;
-    let mut child = launch_app_server(port)?;
-    let endpoint = format!("ws://127.0.0.1:{port}");
+    let mut command = quota_command()?;
+    #[cfg(windows)]
+    let (mut child, _process_tree) = quota_process::spawn(&mut command)?;
+    #[cfg(not(windows))]
+    let mut child = command.spawn()?;
 
     let result = timeout(APP_SERVER_REQUEST_TIMEOUT, async {
-        let mut transport = connect_loopback_transport(&endpoint).await?;
+        let mut transport = StdioAppServerTransport {
+            stdin: child
+                .stdin
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("Missing quota input"))?,
+            stdout: BufReader::new(
+                child
+                    .stdout
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("Missing quota output"))?,
+            )
+            .lines(),
+        };
         read_quota_from_transport(&mut transport).await
     })
     .await
     .map_err(|_| anyhow::anyhow!("Timed out while reading the local Codex app-server quota"));
 
-    stop_child(&mut child).await;
-    result?
+    // Dropping the transport closes stdin. EOF lets the single-client server
+    // shut down normally; the owned Job also covers timeout/cancellation/exit.
+    let exit = stop_child(&mut child).await;
+    let quota = result??;
+    exit?;
+    Ok(quota)
 }
 
-struct WebSocketAppServerTransport {
-    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+struct StdioAppServerTransport {
+    stdin: ChildStdin,
+    stdout: Lines<BufReader<ChildStdout>>,
 }
 
 #[allow(async_fn_in_trait)]
-impl AppServerTransport for WebSocketAppServerTransport {
+impl AppServerTransport for StdioAppServerTransport {
     async fn request(&mut self, request: Value) -> anyhow::Result<Value> {
         let request_id = request
             .get("id")
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("App-server quota request was missing an id"))?;
-        self.socket
-            .send(Message::Text(request.to_string().into()))
-            .await
-            .map_err(|_| anyhow::anyhow!("Failed to send a quota request to Codex app-server"))?;
+        self.notify(request).await?;
 
-        while let Some(next) = self.socket.next().await {
-            let message =
-                next.map_err(|_| anyhow::anyhow!("Codex app-server connection failed"))?;
-            let payload = match message {
-                Message::Text(value) => value.to_string(),
-                Message::Binary(value) => String::from_utf8(value.to_vec()).map_err(|_| {
-                    anyhow::anyhow!("Codex app-server returned non-UTF-8 quota data")
-                })?,
-                Message::Close(_) => anyhow::bail!("Codex app-server closed the quota connection"),
-                Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
-            };
+        while let Some(payload) = self
+            .stdout
+            .next_line()
+            .await
+            .map_err(|_| anyhow::anyhow!("Codex app-server quota connection failed"))?
+        {
             let response = serde_json::from_str::<Value>(&payload)
                 .map_err(|_| anyhow::anyhow!("Codex app-server returned malformed quota data"))?;
             if response.get("id") == Some(&request_id) {
@@ -181,10 +194,12 @@ impl AppServerTransport for WebSocketAppServerTransport {
     }
 
     async fn notify(&mut self, notification: Value) -> anyhow::Result<()> {
-        self.socket
-            .send(Message::Text(notification.to_string().into()))
+        self.stdin
+            .write_all(format!("{notification}\n").as_bytes())
             .await
-            .map_err(|_| anyhow::anyhow!("Failed to complete Codex app-server initialization"))
+            .map_err(|_| anyhow::anyhow!("Failed to send a quota request to Codex app-server"))?;
+        self.stdin.flush().await?;
+        Ok(())
     }
 }
 
@@ -270,20 +285,18 @@ fn selected_rate_limits(response: &Value) -> Option<&Value> {
         .filter(|value| value.is_object())
 }
 
-fn launch_app_server(port: u16) -> anyhow::Result<Child> {
+fn quota_command() -> anyhow::Result<Command> {
     let executable = resolve_codex_executable()
         .ok_or_else(|| anyhow::anyhow!("Could not locate the installed Codex CLI executable"))?;
     let mut command = Command::new(executable);
     command
-        .args(["app-server", "--listen", &format!("ws://127.0.0.1:{port}")])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .args(["app-server", "--disable", "plugins", "--listen", "stdio://"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
     configure_no_console(&mut command);
-    command
-        .spawn()
-        .map_err(|_| anyhow::anyhow!("Could not launch the installed Codex CLI"))
+    Ok(command)
 }
 
 #[cfg(windows)]
@@ -316,34 +329,15 @@ fn resolve_codex_executable() -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-async fn reserve_loopback_port() -> anyhow::Result<u16> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+async fn stop_child(child: &mut Child) -> anyhow::Result<()> {
+    let status = timeout(APP_SERVER_EXIT_TIMEOUT, child.wait())
         .await
-        .map_err(|_| anyhow::anyhow!("Could not reserve a loopback port for Codex app-server"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|_| anyhow::anyhow!("Could not inspect the Codex app-server loopback port"))?
-        .port();
-    drop(listener);
-    Ok(port)
-}
-
-async fn connect_loopback_transport(endpoint: &str) -> anyhow::Result<WebSocketAppServerTransport> {
-    let deadline = Instant::now() + APP_SERVER_CONNECT_TIMEOUT;
-    loop {
-        match connect_async(endpoint).await {
-            Ok((socket, _)) => return Ok(WebSocketAppServerTransport { socket }),
-            Err(_) if Instant::now() < deadline => sleep(Duration::from_millis(50)).await,
-            Err(_) => anyhow::bail!("Could not connect to the local Codex app-server"),
-        }
-    }
-}
-
-async fn stop_child(child: &mut Child) {
-    if child.try_wait().ok().flatten().is_none() {
-        let _ = child.start_kill();
-        let _ = timeout(Duration::from_secs(1), child.wait()).await;
-    }
+        .map_err(|_| anyhow::anyhow!("Codex quota process did not exit after closing input"))??;
+    anyhow::ensure!(
+        status.success(),
+        "Codex quota process exited unsuccessfully"
+    );
+    Ok(())
 }
 
 #[cfg(all(test, windows))]
