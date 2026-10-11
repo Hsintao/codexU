@@ -108,15 +108,32 @@ jobs:
           name: codexu-windows-${{ needs.resolve-version.outputs.version }}
           path: dist/windows/*
           if-no-files-found: error
-      - name: Verify isolated Windows installation and upgrade
-        if: github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+  windows-installation:
+    if: github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+    needs: [resolve-version, windows]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        installer: [msi, nsis]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: codexu-windows-${{ needs.resolve-version.outputs.version }}
+          path: dist/windows
+          run-id: ${{ inputs.candidate_run || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify isolated installation and upgrade
         shell: pwsh
-        run: .\scripts\test-windows-installers.ps1 -Version "${{ needs.resolve-version.outputs.version }}"
-      - name: Upload Windows installation evidence
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+        run: .\scripts\test-windows-installers.ps1 -Version "${{ needs.resolve-version.outputs.version }}" -Installer "${{ matrix.installer }}"
+      - name: Upload installation evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codexu-installation-${{ needs.resolve-version.outputs.version }}
+          name: codexu-installation-${{ matrix.installer }}-${{ needs.resolve-version.outputs.version }}
           path: .local-artifacts/installer-acceptance/*
           if-no-files-found: warn
 

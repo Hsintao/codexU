@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Version)
+param([Parameter(Mandatory)][string]$Version, [Parameter(Mandatory)][ValidateSet('msi', 'nsis')][string]$Installer)
 
 # Real installation is restricted to an ephemeral hosted runner, never a user's PC.
 Set-StrictMode -Version Latest
@@ -82,7 +82,7 @@ function Get-Baseline([string]$Name, [string]$Hash) {
     if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Hash) { throw 'Baseline installer checksum mismatch.' }
     return $Path
 }
-$Receipt = [ordered]@{ version = $Version; source_sha = $Manifest.source_sha; test_source_sha = $env:GITHUB_SHA; runner = $env:RUNNER_OS; baseline = '1.3.3'; result = 'running'; steps = $Records }
+$Receipt = [ordered]@{ version = $Version; installer = $Installer; source_sha = $Manifest.source_sha; test_source_sha = $env:GITHUB_SHA; runner = $env:RUNNER_OS; baseline = '1.3.3'; result = 'running'; steps = $Records }
 try {
     $Nsis = Join-Path $Packages "codexU-$Version-windows-x86_64-setup.exe"
     $Msi = Join-Path $Packages "codexU-$Version-windows-x86_64.msi"
@@ -91,6 +91,7 @@ try {
         if ((Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Checksum) { throw 'Candidate checksum mismatch.' }
     }
     # NSIS: clean installation, uninstall, then a real 1.3.3 -> candidate upgrade.
+    if ($Installer -eq 'nsis') {
     $NsisDirectory = Join-Path $Owned 'nsis'
     Invoke-Installer $Nsis @('/S', "/D=$NsisDirectory") 'nsis-clean-install'
     $null = Assert-Installed $NsisDirectory $Version $true
@@ -109,7 +110,9 @@ try {
     $Records.Add([ordered]@{ step = 'nsis-upgrade-data'; preserved = $true })
     Invoke-NsisUninstaller $NsisDirectory 'nsis-upgrade-uninstall'
     Assert-Uninstalled $NsisDirectory
+    }
     # MSI: both clean installation and same UpgradeCode upgrade of the old package.
+    if ($Installer -eq 'msi') {
     $MsiDirectory = Join-Path $Owned 'msi'
     Invoke-Installer 'msiexec.exe' @('/i', "`"$Msi`"", '/qn', '/norestart', "INSTALLDIR=`"$MsiDirectory`"", '/L*v', "`"$(Join-Path $Evidence 'msi-clean.log')`"") 'msi-clean-install'
     $Entry = Assert-Installed $MsiDirectory $Version $true
@@ -118,6 +121,10 @@ try {
     $OldMsi = Get-Baseline 'codexU-1.3.3-windows-x86_64.msi' 'e59e9df4e8d9f5adbd487daf20906176ef99dc1262a98a447eb74a30fe6440de'
     Invoke-Installer 'msiexec.exe' @('/i', "`"$OldMsi`"", '/qn', '/norestart', "INSTALLDIR=`"$MsiDirectory`"") 'msi-baseline-install'
     $OldEntry = Assert-Installed $MsiDirectory '1.3.3' $false
+    $Data = Join-Path $env:APPDATA 'com.codexU.app'
+    New-Item -ItemType Directory -Path $Data -Force | Out-Null
+    $Marker = Join-Path $Data 'installer-test-preserve.txt'
+    [IO.File]::WriteAllText($Marker, 'owned runner fixture', [Text.UTF8Encoding]::new($false))
     Invoke-Installer 'msiexec.exe' @('/i', "`"$Msi`"", '/qn', '/norestart', "INSTALLDIR=`"$MsiDirectory`"", '/L*v', "`"$(Join-Path $Evidence 'msi-upgrade.log')`"") 'msi-upgrade'
     $Entry = Assert-Installed $MsiDirectory $Version $true
     if ($OldEntry.PSChildName -eq $Entry.PSChildName) { throw 'MSI upgrade did not replace the old ProductCode.' }
@@ -125,6 +132,7 @@ try {
     $Records.Add([ordered]@{ step = 'msi-upgrade-data'; preserved = $true; old_product_removed = $true })
     Invoke-Installer 'msiexec.exe' @('/x', $Entry.PSChildName, '/qn', '/norestart') 'msi-upgrade-uninstall'
     Assert-Uninstalled $MsiDirectory
+    }
     $Receipt.result = 'PASS'
 } catch {
     $Receipt.result = 'FAIL'
@@ -135,4 +143,4 @@ try {
     # Runner disposal owns cleanup, including failed partial installations. This
     # script never tries broader deletion or touches a user's local installation.
 }
-Write-Output "Real MSI/NSIS clean install, 1.3.3 upgrade, data preservation and uninstall passed for $Version."
+Write-Output "Real $Installer clean install, 1.3.3 upgrade, data preservation and uninstall passed for $Version."
