@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FolderOpen, Palette, RefreshCw, Trash2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { useSettings } from '../hooks/useSettings';
 import type { InterfaceLanguage, ThemeMode, TrayDensity } from '../types/settings';
 import { isTauriRuntimeAvailable, requireTauriRuntime } from '../utils/tauri';
@@ -18,6 +19,16 @@ export function Settings() {
   const { settings, update, error } = useSettings();
   const { t, language, preference, setPreference } = useI18n();
   const [saved, setSaved] = useState(false);
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canInvokeTauri) return;
+    let cancelled = false;
+    getVersion().then(value => {
+      if (!cancelled) setVersion(value);
+    }).catch(error => console.warn('Could not read the application version', error));
+    return () => { cancelled = true; };
+  }, [canInvokeTauri]);
 
   useEffect(() => {
     applyAppTheme(
@@ -311,7 +322,7 @@ export function Settings() {
           </Section>
 
           <Section id="settings-section-about" title={t('settings.about')}>
-            <p className="text-sm text-secondary">{t('settings.version')}</p>
+            {version && <p className="text-sm text-secondary" data-app-version={version}>{t('settings.version', { version })}</p>}
             <p className="text-xs text-tertiary mt-2">{t('settings.dataFolder', { path: settings.app_data_dir })}</p>
             <p className="text-xs text-tertiary mt-2">{t('settings.privacy')}</p>
             {!canInvokeTauri && (
