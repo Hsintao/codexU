@@ -25,6 +25,12 @@ $Manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Directory "
 if ($Manifest.version -ne $Version -or $Manifest.target -ne "windows-x86_64") {
     throw "Artifact manifest version/target mismatch."
 }
+if ($Manifest.source_sha -notmatch '^[0-9a-f]{40}$' -or $Manifest.program_sha256 -notmatch '^[0-9a-f]{64}$') {
+    throw "Artifact source/program identity is missing or invalid."
+}
+if (-not $Notes.Contains($Manifest.source_sha) -or -not $Notes.Contains($Manifest.program_sha256)) {
+    throw "Release notes must bind the candidate source and program SHA-256."
+}
 $Names = @("codexU-$Version-windows-x86_64.msi", "codexU-$Version-windows-x86_64-setup.exe")
 foreach ($Name in $Names) {
     if ($Manifest.installers -notcontains $Name) { throw "Manifest is missing $Name." }
