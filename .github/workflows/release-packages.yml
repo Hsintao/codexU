@@ -79,6 +79,17 @@ jobs:
       - name: Build and verify Windows installers
         shell: pwsh
         run: .\scripts\build-windows-release.ps1 -Version "${{ needs.resolve-version.outputs.version }}"
+      - name: Verify isolated Windows installation and upgrade
+        if: github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+        shell: pwsh
+        run: .\scripts\test-windows-installers.ps1 -Version "${{ needs.resolve-version.outputs.version }}"
+      - name: Upload Windows installation evidence
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexu-installation-${{ needs.resolve-version.outputs.version }}
+          path: .local-artifacts/installer-acceptance/*
+          if-no-files-found: warn
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
