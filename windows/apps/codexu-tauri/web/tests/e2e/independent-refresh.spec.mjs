@@ -11,9 +11,14 @@ test('real AppState restart, independent slow/failing branches, recovery and sou
   const observations = [];
   async function observe(name) {
     const view = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('get_usage_state'));
-    const states = await page.getByTestId('refresh-status').innerText();
+    const strip = page.getByTestId('refresh-status');
+    const states = await strip.count() ? await strip.innerText() : '';
     observations.push({ name, states, view });
     await page.screenshot({ path: path.join(evidence, name + '.png'), fullPage: true });
+  }
+  async function current(branch) {
+    await expect.poll(() => page.evaluate(async branch => (await window.__TAURI_INTERNALS__.invoke('get_usage_state')).refresh[branch].phase, branch), { timeout: 10_000 }).toBe('current');
+    await expect(page.getByTestId('refresh-' + branch)).toHaveCount(0);
   }
   async function scenario(mode) {
     await page.selectOption('#scenario', mode);
@@ -21,40 +26,46 @@ test('real AppState restart, independent slow/failing branches, recovery and sou
   }
   await page.goto('/tests/refresh-harness.html');
   await expect(page.getByTestId('refresh-history')).toContainText('saved summary; details pending');
-  await expect(page.getByTestId('refresh-quota')).toContainText('Up to date');
-  await expect(page.getByTestId('refresh-tasks')).toContainText('Up to date');
+  await current('quota');
+  await current('tasks');
   await expect(page.getByRole('region', { name: 'Local token metrics' })).toContainText('300');
   await expect(page.locator('.leadership-overview-card')).toContainText('67');
   await observe('restart-history-loading');
-  await expect(page.getByTestId('refresh-history')).toContainText('Up to date', { timeout: 10_000 });
+  await current('history');
+  await expect(page.getByTestId('refresh-status')).toHaveCount(0);
   for (const branch of ['quota', 'tasks', 'history']) {
     await scenario(branch + '-slow');
     await expect(page.getByTestId('refresh-' + branch)).toContainText('Updating');
-    for (const sibling of ['quota', 'tasks', 'history'].filter(s => s !== branch)) await expect(page.getByTestId('refresh-' + sibling)).toContainText('Up to date');
+    for (const sibling of ['quota', 'tasks', 'history'].filter(s => s !== branch)) await current(sibling);
     await observe(branch + '-slow');
-    await expect(page.getByTestId('refresh-' + branch)).toContainText('Up to date', { timeout: 10_000 });
+    await current(branch);
     await scenario(branch + '-fail');
     await expect(page.getByTestId('refresh-' + branch)).toContainText('Refresh failed');
-    for (const sibling of ['quota', 'tasks', 'history'].filter(s => s !== branch)) await expect(page.getByTestId('refresh-' + sibling)).toContainText('Up to date');
+    for (const sibling of ['quota', 'tasks', 'history'].filter(s => s !== branch)) await current(sibling);
     await expect(page.getByRole('region', { name: 'Local token metrics' })).toContainText('300');
     await observe(branch + '-failed');
     await scenario('recover');
-    await expect(page.getByTestId('refresh-' + branch)).toContainText('Up to date');
+    await current(branch);
   }
   await page.click('#language');
-  await expect(page.getByTestId('refresh-history')).toHaveText('历史: 已更新');
+  await current('history');
+  await expect(page.getByTestId('refresh-status')).toHaveCount(0);
   await scenario('history-fail');
   await expect(page.getByTestId('refresh-history')).toContainText('刷新失败 · 显示上次数据');
+  await current('quota');
+  await current('tasks');
+  await expect(page.getByTestId('refresh-status').locator('[data-testid^=refresh-]')).toHaveCount(1);
   await observe('chinese-history-failed');
   await scenario('recover');
-  await expect(page.getByTestId('refresh-history')).toHaveText('历史: 已更新');
+  await current('history');
+  await expect(page.getByTestId('refresh-status')).toHaveCount(0);
   await scenario('cold');
   await expect(page.getByTestId('refresh-history')).toContainText('正在读取');
   const metrics = page.getByRole('region', { name: '本地 Token 指标' });
   await expect(metrics).toContainText('--');
   await expect(metrics).not.toContainText('300');
   await observe('cold-history-missing');
-  await expect(page.getByTestId('refresh-history')).toHaveText('历史: 已更新', { timeout: 10_000 });
+  await current('history');
   // Hold one genuine old AppState response while newer source updates reach the hook.
   await page.evaluate(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;

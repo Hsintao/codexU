@@ -67,6 +67,16 @@ impl ParserState {
         }
         let object: Value =
             serde_json::from_slice(line).map_err(|_| HistoryReadError::InvalidRecord)?;
+        self.consume_object(db, source, offset, &object)
+    }
+
+    pub fn consume_object(
+        &mut self,
+        db: &Connection,
+        source: i64,
+        offset: i64,
+        object: &Value,
+    ) -> anyhow::Result<()> {
         if !object.is_object() {
             return Err(HistoryReadError::InvalidRecord.into());
         }

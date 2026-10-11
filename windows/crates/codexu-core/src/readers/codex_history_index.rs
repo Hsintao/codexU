@@ -348,15 +348,32 @@ fn refresh_source(
             let newline = buffer.iter().position(|b| *b == b'\n');
             let bytes = newline.map_or(buffer.len(), |n| n + 1);
             let contents = newline.unwrap_or(buffer.len());
-            if line.len().saturating_add(contents) > MAX_LINE_BYTES {
-                return Err(HistoryReadError::ResourceLimited.into());
-            }
-            line.extend_from_slice(&buffer[..contents]);
-            reader.consume(bytes);
-            offset += bytes as i64;
-            metrics.parser_read_bytes += bytes as u64;
-            if newline.is_some() {
-                source.state.consume(db, source.id, line_offset, &line)?;
+            let terminated = if line.len().saturating_add(contents) > MAX_LINE_BYTES {
+                // Large image/tool-output records are valid history. Re-read this
+                // record with a bounded projection, validating its entire JSON.
+                reader.seek(SeekFrom::Start(line_offset as u64))?;
+                line.clear();
+                let (object, consumed, terminated) = super::codex_large_record::read(&mut reader)?;
+                offset = line_offset + consumed as i64;
+                metrics.parser_read_bytes += consumed;
+                source
+                    .state
+                    .consume_object(db, source.id, line_offset, &object)?;
+                if !terminated {
+                    break;
+                }
+                terminated
+            } else {
+                line.extend_from_slice(&buffer[..contents]);
+                reader.consume(bytes);
+                offset += bytes as i64;
+                metrics.parser_read_bytes += bytes as u64;
+                if newline.is_some() {
+                    source.state.consume(db, source.id, line_offset, &line)?;
+                }
+                newline.is_some()
+            };
+            if terminated {
                 line.clear();
                 line_offset = offset;
                 checkpoint_offset = offset;

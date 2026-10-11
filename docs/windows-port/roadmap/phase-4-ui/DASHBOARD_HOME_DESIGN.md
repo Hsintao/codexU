@@ -1,6 +1,6 @@
 # Windows Dashboard Home Design
 
-**Status:** approved direction; official quota boundary revised 2026-07-29
+**Status:** approved direction; official quota lifecycle revised 2026-10-12
 **Scope:** Windows Tauri dashboard, local Codex app-server quota reader, and static showcase
 
 ## Goal
@@ -15,7 +15,9 @@ The product stays a quiet, local-first Liquid Glass utility. The result is not a
 
 The Tauri commands expose `LocalUsage`: local Token totals, detailed Token splits, daily/long-range trends, projects, tools, and the Leadership snapshot. These values remain explicitly local usage rather than account allowance.
 
-The dashboard may additionally read the user's already-installed `codex app-server` over a private loopback WebSocket. It calls only `initialize`, `account/read`, and `account/rateLimits/read`, then normalizes the official `rateLimitsByLimitId.codex` response into the existing `RateWindow` shape. No Codex data is uploaded, and no local transcript, token total, or time-series value is used to estimate quota.
+The dashboard additionally reads the user's already-installed `codex app-server` over private stdio pipes. Each bounded query disables `plugins` for that child only, so an account lookup cannot start plugin marketplace synchronization. It calls only `initialize`, `account/read`, and `account/rateLimits/read`, then normalizes the official `rateLimitsByLimitId.codex` response into the existing `RateWindow` shape. No Codex data is uploaded, and no local transcript, token total, or time-series value is used to estimate quota.
+
+The Windows child starts suspended, joins a private non-inheritable Job with `KILL_ON_JOB_CLOSE`, and resumes only after ownership is established. Closing stdin after the query lets the server exit normally. Query timeout, cancellation, or application exit closes the Job and reclaims any surviving descendants. User configuration, other Codex instances, and existing marketplace files are untouched; no periodic disk cleanup substitutes for preventing the downloads.
 
 An authoritative response may contain only one known window (for example a seven-day limit); that single window is displayed rather than rejected or completed with a made-up five-hour value. Unknown, malformed, or duplicate duration topologies fail closed. A failed refresh retains the last verified official window for display and marks it as last verified; a first read stays neutral and exposes a retry action.
 
@@ -39,7 +41,7 @@ At narrow widths, the instrument row and lower chart row stack without changing 
 
 - `Dashboard.tsx` owns tab selection, the default home route, existing data hooks, and the concise quota freshness status.
 - `DashboardHome.tsx` is a presentation-only composition over `LocalUsage`, `LeadershipDashboardSnapshot`, and normalized official rate-limit windows; it does not invoke Tauri and never computes product scores or quota estimates.
-- `codex_app_server.rs` owns local app-server discovery, the loopback-only JSON-RPC exchange, and fail-closed rate-window normalization.
+- `codex_app_server.rs` owns local app-server discovery, the stdio JSON-RPC exchange, normal EOF shutdown, and fail-closed rate-window normalization. `quota_process.rs` owns the Windows process-tree lifetime.
 - `LeadershipPanel.tsx` retains the detailed view. Its compact, reusable overview and progression primitives are extracted only when doing so removes duplicated visual/data mapping.
 - `UsageMixFocus.tsx` renders the real Token composition from `DetailedUsage.seven_day`; its labels make clear that the values are local Token usage, not account quota.
 - Existing `StatCard`, `TokenBarChart`, and `TrendChart` stay the canonical sources for their existing facts and interaction behavior.
@@ -59,6 +61,6 @@ After native acceptance, create `docs/windows-port/showcase/WINDOWS_DASHBOARD_SH
 
 - At 960×760-ish native size, the home page shows Leadership identity, seven-day Token focus, three usage summaries, and the L1–L7 progression without clipping.
 - The progression uses existing assets and exact canonical mapping; its 0–100 color domain is clipped at score rather than compressed into the completed segment.
-- The only new data reader is the private-loopback `codex app-server` rate-limit reader. It makes no remote service request of its own, does not parse raw transcript content, and does not estimate or fabricate a missing quota window.
+- The quota reader uses private stdio and disables plugin startup for its own CLI child. It makes no remote service request of its own, does not parse raw transcript content, and does not estimate or fabricate a missing quota window. Repeated real refreshes must preserve quota while adding no marketplace staging copies or orphan processes.
 - `npm run build`, `cargo test --workspace`, `cargo tauri build --no-bundle`, and `git diff --check` pass.
 - The final pair of showcase documents and the parity report agree on screenshots, conclusions, validation, and retained differences.
