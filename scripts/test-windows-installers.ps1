@@ -15,9 +15,11 @@ $Evidence = Join-Path $Repo '.local-artifacts\installer-acceptance'
 $Owned = Join-Path $env:RUNNER_TEMP ('codexu-install-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Owned -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Path $Evidence -Force | Out-Null
-$ExpectedExe = Join-Path $Repo 'windows\target\release\codexu-tauri.exe'
-if (-not (Test-Path -LiteralPath $ExpectedExe)) { throw 'The packaged executable is missing.' }
-$ExpectedHash = (Get-FileHash -LiteralPath $ExpectedExe -Algorithm SHA256).Hash
+$Manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Packages 'manifest.json') | ConvertFrom-Json
+if ($Manifest.version -ne $Version -or $Manifest.source_sha -notmatch '^[0-9a-f]{40}$' -or $Manifest.program_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Candidate identity is missing or invalid.' }
+$ExpectedHash = $Manifest.program_sha256
+& git -C $Repo diff --quiet $Manifest.source_sha HEAD -- windows Resources Sources scripts/build-windows-release.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Product or packaging source changed; build a new candidate before testing.' }
 $Records = [System.Collections.Generic.List[object]]::new()
 $RegistryRoots = @(
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -58,9 +60,21 @@ function Assert-Installed([string]$Directory, [string]$ExpectedVersion, [bool]$C
     return $Entries[0]
 }
 function Assert-Uninstalled([string]$Directory) {
+    $Deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        if (-not (Test-Path -LiteralPath (Join-Path $Directory 'codexu-tauri.exe')) -and @(Get-CodexURegistration).Count -eq 0) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $Deadline)
     if (Test-Path -LiteralPath (Join-Path $Directory 'codexu-tauri.exe')) { throw 'Uninstaller left the application executable.' }
     if (@(Get-CodexURegistration).Count -ne 0) { throw 'Uninstaller left codexU registration.' }
     $Records.Add([ordered]@{ step = 'uninstalled'; executable_absent = $true; registration_absent = $true })
+}
+function Invoke-NsisUninstaller([string]$Directory, [string]$Label) {
+    # NSIS's ordinary launcher copies itself and exits before uninstall finishes.
+    # A copy and _?= make our waited process own the actual uninstall exit code.
+    $Copy = Join-Path $Owned ($Label + '.exe')
+    Copy-Item -LiteralPath (Join-Path $Directory 'uninstall.exe') -Destination $Copy
+    Invoke-Installer $Copy @('/S', "_?=$Directory") $Label
 }
 function Get-Baseline([string]$Name, [string]$Hash) {
     $Path = Join-Path $Owned $Name
@@ -68,7 +82,7 @@ function Get-Baseline([string]$Name, [string]$Hash) {
     if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Hash) { throw 'Baseline installer checksum mismatch.' }
     return $Path
 }
-$Receipt = [ordered]@{ version = $Version; source_sha = $env:GITHUB_SHA; runner = $env:RUNNER_OS; baseline = '1.3.3'; result = 'running'; steps = $Records }
+$Receipt = [ordered]@{ version = $Version; source_sha = $Manifest.source_sha; test_source_sha = $env:GITHUB_SHA; runner = $env:RUNNER_OS; baseline = '1.3.3'; result = 'running'; steps = $Records }
 try {
     $Nsis = Join-Path $Packages "codexU-$Version-windows-x86_64-setup.exe"
     $Msi = Join-Path $Packages "codexU-$Version-windows-x86_64.msi"
@@ -80,7 +94,7 @@ try {
     $NsisDirectory = Join-Path $Owned 'nsis'
     Invoke-Installer $Nsis @('/S', "/D=$NsisDirectory") 'nsis-clean-install'
     $null = Assert-Installed $NsisDirectory $Version $true
-    Invoke-Installer (Join-Path $NsisDirectory 'uninstall.exe') @('/S') 'nsis-clean-uninstall'
+    Invoke-NsisUninstaller $NsisDirectory 'nsis-clean-uninstall'
     Assert-Uninstalled $NsisDirectory
     $OldNsis = Get-Baseline 'codexU-1.3.3-windows-x86_64-setup.exe' 'c4fdd845ea6bbbda3c622f8c727a36d7555790aa9441631e6918e31cded8e399'
     Invoke-Installer $OldNsis @('/S', "/D=$NsisDirectory") 'nsis-baseline-install'
@@ -93,7 +107,7 @@ try {
     $null = Assert-Installed $NsisDirectory $Version $true
     if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $Marker) -ne 'owned runner fixture') { throw 'Upgrade removed application data.' }
     $Records.Add([ordered]@{ step = 'nsis-upgrade-data'; preserved = $true })
-    Invoke-Installer (Join-Path $NsisDirectory 'uninstall.exe') @('/S') 'nsis-upgrade-uninstall'
+    Invoke-NsisUninstaller $NsisDirectory 'nsis-upgrade-uninstall'
     Assert-Uninstalled $NsisDirectory
     # MSI: both clean installation and same UpgradeCode upgrade of the old package.
     $MsiDirectory = Join-Path $Owned 'msi'
