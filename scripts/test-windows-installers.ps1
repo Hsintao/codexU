@@ -5,7 +5,7 @@ param([Parameter(Mandatory)][string]$Version)
 # Real installation is restricted to an ephemeral hosted runner, never a user's PC.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') {
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     throw 'Installer acceptance requires an ephemeral GitHub Windows runner.'
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected a stable semantic version.' }
@@ -29,7 +29,7 @@ function Get-CodexURegistration {
         if (Test-Path -LiteralPath $Root) {
             Get-ChildItem -LiteralPath $Root | ForEach-Object {
                 $Entry = Get-ItemProperty -LiteralPath $_.PSPath
-                if ($Entry.PSObject.Properties.Name -contains 'DisplayName' -and $Entry.DisplayName -eq 'codexU') {
+                if ($null -ne $Entry -and $null -ne $Entry.PSObject.Properties['DisplayName'] -and $Entry.DisplayName -eq 'codexU') {
                     $Entry
                 }
             }
