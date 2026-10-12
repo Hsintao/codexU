@@ -1,0 +1,222 @@
+[
+  {
+    "name": "6.1 Sol standard",
+    "model": "gpt-6.1-sol",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.229,
+    "reference": false
+  },
+  {
+    "name": "6 Sol distinct cache rate",
+    "model": "gpt-6-sol",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.233,
+    "reference": false
+  },
+  {
+    "name": "Astra standard",
+    "model": "gpt-6-astra",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 1.165,
+    "reference": false
+  },
+  {
+    "name": "Luna standard",
+    "model": "gpt-6-luna",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.01165,
+    "reference": false
+  },
+  {
+    "name": "snapshot and case",
+    "model": " GPT-6.1-SOL-2026-10-08 ",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.229,
+    "reference": false
+  },
+  {
+    "name": "priority cache writes",
+    "model": "gpt-6.1-sol",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": "priority",
+    "expected": 0.458,
+    "reference": false
+  },
+  {
+    "name": "ultrafast",
+    "model": "gpt-6-astra",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": "ULTRAFAST",
+    "expected": 6.99,
+    "reference": false
+  },
+  {
+    "name": "flex",
+    "model": "gpt-6.1-sol",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": "flex",
+    "expected": 0.1145,
+    "reference": false
+  },
+  {
+    "name": "batch",
+    "model": "gpt-6-sol",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": "batch",
+    "expected": 0.1165,
+    "reference": false
+  },
+  {
+    "name": "threshold exact",
+    "model": "gpt-6.1-sol",
+    "input": 272000,
+    "cached": 100000,
+    "write": 100000,
+    "output": 100000,
+    "tier": null,
+    "expected": 1.404,
+    "reference": false
+  },
+  {
+    "name": "long context",
+    "model": "gpt-6.1-sol",
+    "input": 300000,
+    "cached": 100000,
+    "write": 100000,
+    "output": 100000,
+    "tier": null,
+    "expected": 2.42,
+    "reference": false
+  },
+  {
+    "name": "long fast",
+    "model": "gpt-6.1-sol",
+    "input": 300000,
+    "cached": 100000,
+    "write": 100000,
+    "output": 100000,
+    "tier": "fast",
+    "expected": 4.84,
+    "reference": false
+  },
+  {
+    "name": "reasoning is included in output",
+    "model": "gpt-6.1-sol",
+    "input": 0,
+    "cached": 0,
+    "write": 0,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.1,
+    "reference": false
+  },
+  {
+    "name": "cache clamp",
+    "model": "gpt-6.1-sol",
+    "input": 100,
+    "cached": 200,
+    "write": 300,
+    "output": -4,
+    "tier": null,
+    "expected": 1e-05,
+    "reference": false
+  },
+  {
+    "name": "zero usage",
+    "model": "gpt-6.1-sol",
+    "input": 0,
+    "cached": 0,
+    "write": 0,
+    "output": 0,
+    "tier": null,
+    "expected": 0,
+    "reference": false
+  },
+  {
+    "name": "unknown reference",
+    "model": "future-model",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.62,
+    "reference": true
+  },
+  {
+    "name": "unknown variant cannot inherit",
+    "model": "gpt-6.1-sol-unpriced",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.62,
+    "reference": true
+  },
+  {
+    "name": "unknown tier reference",
+    "model": "gpt-6.1-sol",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": "unpriced-tier",
+    "expected": 0.229,
+    "reference": true
+  },
+  {
+    "name": "Spark reference",
+    "model": "gpt-5.3-codex-spark",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.62,
+    "reference": true
+  },
+  {
+    "name": "5.6 current price",
+    "model": "gpt-5.6",
+    "input": 100000,
+    "cached": 40000,
+    "write": 10000,
+    "output": 10000,
+    "tier": null,
+    "expected": 0.466,
+    "reference": false
+  }
+]

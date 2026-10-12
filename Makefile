@@ -43,6 +43,7 @@ build: test-leadership-assets
 	cp Resources/Info.plist "$(APP_DIR)/Contents/Info.plist"
 	cp "$(APP_ICON)" "$(RESOURCES_DIR)/"
 	cp Resources/*.png "$(RESOURCES_DIR)/"
+	cp Resources/model-pricing*.json "$(RESOURCES_DIR)/"
 	cp -R Resources/LeadershipBadges "$(RESOURCES_DIR)/LeadershipBadges"
 	cp -R Resources/Palettes "$(RESOURCES_DIR)/Palettes"
 	/usr/bin/xattr -dr com.apple.quarantine "$(APP_DIR)" 2>/dev/null || true

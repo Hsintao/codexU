@@ -151,7 +151,7 @@ final class UsageIndexWorker {
                     checkpoint: state?.parser ?? CodexIndexCheckpoint(), previousStamp: state?.stamp,
                     finishFrozenTail: state?.awaitingNewline ?? false, runtime: runtime, claudeCheckpoint: state?.claude,
                     forceRebuild: try checkpoint.map { cp in
-                        (try store.scalar("SELECT parser_version FROM source_generation WHERE source_id=? AND generation=?", [.text(source),.integer(cp.generation)]) ?? 0) < 3
+                        (try store.scalar("SELECT parser_version FROM source_generation WHERE source_id=? AND generation=?", [.text(source),.integer(cp.generation)]) ?? 0) < 4
                     } ?? false)
                 let requestEpoch = epoch
                 busy.insert(slot)

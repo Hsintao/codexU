@@ -16,13 +16,14 @@ enum RuntimeFastSourceSelfTest {
             let launcher = application.appendingPathComponent("Contents/Resources/codex-cli/bin/codex")
             let legacy = application.appendingPathComponent("Contents/Resources/codex")
             let cli = root.appendingPathComponent("bin/codex")
-            for executable in [native, launcher, legacy, cli] {
+            let standalone = root.appendingPathComponent(".local/bin/codex")
+            for executable in [native, launcher, legacy, cli, standalone] {
                 try fileManager.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
                 try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
             }
             func located() -> URL? {
-                CodexExecutableLocator.resolve(applicationURLs: [application], cliPaths: [cli.path])
+                CodexExecutableLocator.resolve(applicationURLs: [application], cliPaths: [cli.path, standalone.path])
             }
             expect(located() == native, "new nested native CLI should be preferred, including a renamed app")
             try fileManager.removeItem(at: native)
@@ -39,6 +40,10 @@ enum RuntimeFastSourceSelfTest {
             expect(CodexExecutableLocator.resolve(applicationURLs: [], cliPaths: [cliLink.path]) == cliLink,
                    "standard CLI symlinks must remain supported")
             try fileManager.removeItem(at: cli)
+            expect(located() == standalone, "user-local standalone CLI should resolve when all existing candidates are unavailable")
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: standalone.path)
+            expect(located() == nil, "non-executable user-local CLI must remain unavailable")
+            try fileManager.removeItem(at: standalone)
             expect(located() == nil, "missing executables must remain unavailable")
 
             let cache = root.appendingPathComponent("cache", isDirectory: true)

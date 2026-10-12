@@ -75,6 +75,8 @@ The Windows version is an independent Tauri desktop implementation. The public W
 
 ## Value progress
 
+macOS reads model prices from a packaged local JSON catalog, including GPT-6 cache-read, cache-write and service-tier rates. Missing prices are explicitly marked as reference estimates. See [the model pricing catalog](docs/MODEL_PRICING.md) for sources and cache invalidation rules. Other platforms can reuse the catalog and calculation vectors; the app does not fetch prices at runtime.
+
 Value progress estimates the current month's API-equivalent value from locally parsed Codex usage. Each request is priced with its recorded model and service tier, splitting input into ordinary uncached input, cache writes, and cached input before adding output-token cost. Recorded `priority` or `fast` requests use the published Fast mode API rates. Models with long-context pricing use the published long-context rates when one request exceeds 272K input tokens. Reasoning effort is not multiplied separately because reasoning tokens are already included in output usage. Prices come from OpenAI's live [API pricing page](https://developers.openai.com/api/docs/pricing) and the corresponding model pages.
 
 GPT-5.3-Codex-Spark remains a research preview without a final published rate. Spark and unknown models therefore use the GPT-5.5 reference rate and display an `≈` marker instead of being presented as officially priced. The progress endpoint remains a stable reference scale: `200M tokens/day × 30 days`, using a 30% ordinary input / 50% cached input / 20% output mix at about `$7.75 / 1M tokens`, or roughly `$46,500`. The bar is nonlinear after Pro 200, so its width is useful for scanning progress but is not a linear dollar ratio. API-equivalent value is an estimate, not an invoice or rebate.
@@ -193,7 +195,7 @@ For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md
 
 ## Data Sources
 
-- Executable discovery: resolve ChatGPT/Codex by bundle identity, supporting the nested `codex-cli/CodexCLI.app`, `codex-cli/bin/codex`, legacy app layouts, and standard CLI locations.
+- Executable discovery: resolve ChatGPT/Codex by bundle identity, supporting the nested `codex-cli/CodexCLI.app`, `codex-cli/bin/codex`, legacy app layouts, and standard CLI locations. macOS preserves their existing selection order and checks `~/.local/bin/codex` only when all of them are unavailable.
 - Account and quota: `codex app-server` JSON-RPC methods `account/read`, `account/rateLimits/read`, and `account/usage/read`.
 - Local token totals: `~/.codex/state_5.sqlite`.
 - Detailed token splits: `token_count` events in `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/*.jsonl`.
