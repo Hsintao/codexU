@@ -34,7 +34,7 @@ const DASHBOARD_TABS: Array<{ id: DashboardContentTab; title: string; titleKey: 
 
 const formatUSD = (value: unknown): string => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
-  return value.toFixed(2);
+  return value.toFixed(Math.abs(value) >= 1_000 ? 0 : 2);
 };
 
 export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, onQuotaRefresh }: DashboardHomeProps) {
