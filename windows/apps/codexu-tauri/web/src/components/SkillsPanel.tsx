@@ -97,11 +97,9 @@ export function SkillsPanel({ skills, tools }: SkillsPanelProps) {
                       className="skill-activity-bar"
                       role="img"
                       aria-label={t('skills.relativeActivityValue', { value: intensity })}
+                      title={t('skills.percentOfTop', { value: intensity })}
                       style={{ '--skill-intensity': `${intensity}%` } as SkillActivityStyle}
                     />
-                    <p className="mt-1 text-[11px] text-tertiary sm:text-right">
-                      {t('skills.percentOfTop', { value: intensity })}
-                    </p>
                   </div>
                   <div className="w-20 shrink-0 text-right">
                     <p className="text-sm font-semibold tabular-nums text-primary">{formatCount(reads)}</p>

@@ -36,11 +36,13 @@ export function ToolUsageList({ tools }: ToolUsageListProps) {
                   {tool.category}
                 </span>
               </div>
-              <span className="text-secondary">{formatQuantity(tool.call_count)}</span>
+              <span className="text-secondary">{t('projects.calls', { count: formatQuantity(tool.call_count), unit: tool.call_count === 1 ? 'call' : 'calls' })}</span>
             </div>
-            <span className="text-xs text-tertiary">
-              {t('projects.estimatedTokens', { value: formatQuantity(tool.estimated_tokens) })}
-            </span>
+            {tool.estimated_tokens != null && (
+              <span className="text-xs text-tertiary" title={t('projects.estimatedTokensNote')}>
+                {t('projects.estimatedTokens', { value: formatQuantity(tool.estimated_tokens) })}
+              </span>
+            )}
             <div className="h-2 w-full bg-surface-inset rounded-full overflow-hidden">
               <div
                 className="h-full bg-data-tertiary rounded-full"
