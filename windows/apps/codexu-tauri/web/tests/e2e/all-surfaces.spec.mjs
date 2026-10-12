@@ -179,7 +179,9 @@ async function observeDataState(page, surface, dashboard) {
       : page.locator('#dashboard-home-panel-' + surface.id);
   const text = await focused.innerText();
   const hasVisibleContent = text.trim().length >= 80;
-  const hasVisibleValue = /\d/.test(text);
+  const hasVisibleValue = surface.id === 'settings'
+    ? await focused.locator('input').evaluateAll(inputs => inputs.length >= 2 && inputs.every(input => input.value.trim().length > 0))
+    : /\d/.test(text);
   return hasVisibleContent && hasVisibleValue && hasLiveDataForSurface(surface.id, dashboard)
     ? 'populated'
     : 'empty';

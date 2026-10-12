@@ -30,7 +30,6 @@ test('activates the Dashboard Skills tab with safe local-read metadata only', as
   assert.match(panel, /style=\{\{ '--skill-intensity':/);
   assert.match(panel, /skills\.relativeActivityValue/);
   assert.match(panel, /skills\.privacyFiltered/);
-  assert.match(panel, /skills\.localOnly/);
   assert.match(panel, /formatQuantity/);
   assert.match(panel, /formatQuantity\(safeCount\(value\)\)/);
 

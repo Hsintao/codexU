@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { Activity, CircleDashed } from 'lucide-react';
 import { Header } from '../components/Header';
 import { DashboardHome } from '../components/DashboardHome';
 import { RefreshStatus } from '../components/RefreshStatus';
@@ -25,17 +24,6 @@ export function Dashboard() {
   const lastUpdated =
     status ? status.history.updated_at : dashboard?.codex?.snapshot?.refreshed_at ?? dashboard?.refreshed_at ?? localUsage?.last_updated_at ?? null;
   const messages = dashboard?.messages.filter(message => !status || !message.startsWith('Local history ')) ?? [];
-  const quotaStatus = dashboard?.codex?.status ?? 'local_only';
-  const quotaStatusLabel =
-    quotaStatus === 'available'
-      ? t('dashboard.status.officialQuotaActive')
-      : quotaStatus === 'stale'
-        ? t('dashboard.status.officialQuotaLastVerified')
-        : t('dashboard.status.checkingOfficialQuota');
-  const quotaStatusClass =
-    quotaStatus === 'available'
-      ? 'bg-status-ok/12 text-status-ok border-status-ok/30'
-      : 'bg-status-warn/12 text-status-warn border-status-warn/30';
 
   const handleThemeChange = async (theme: 'system' | 'light' | 'dark') => {
     await update({ theme });
@@ -104,11 +92,9 @@ export function Dashboard() {
         )}
 
         <div className="max-w-6xl mx-auto w-full space-y-6">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 chip-like ${quotaStatusClass}`}>
-                <Activity size={12} /> {quotaStatusLabel}
-              </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <RefreshStatus status={status} />
+            <div className="flex items-center gap-2 ml-auto">
               {localUsage ? <span className="text-xs text-tertiary">{t('dashboard.status.threads', { count: localUsage.thread_count })}</span> : null}
               {!localUsage ? (
                 <span className="text-xs text-tertiary">
@@ -116,14 +102,7 @@ export function Dashboard() {
                 </span>
               ) : null}
             </div>
-            <span className="inline-flex items-center gap-1.5 chip-like text-xs text-secondary">
-              <CircleDashed size={12} />
-              {t('dashboard.status.lastUpdate', {
-                time: lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : t('dashboard.status.waiting'),
-              })}
-            </span>
           </div>
-          <RefreshStatus status={status} />
           {error && dashboard ? <p className="text-xs text-status-warn" role="alert">{t('dashboard.refresh.connectionFailed')}</p> : null}
           {messages.length ? (
             <p className="text-xs text-tertiary mt-2">

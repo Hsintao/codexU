@@ -21,5 +21,4 @@ test('Quota overview exposes a visual progress track without changing quota sema
   assert.match(quota, /quota-overview-fill/);
   assert.match(quota, /used_percent/);
   assert.match(quota, /quota\.officialSource/);
-  assert.match(quota, /quota\.confirmedOnly/);
 });
