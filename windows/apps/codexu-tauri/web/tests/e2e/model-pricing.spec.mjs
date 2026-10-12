@@ -5,7 +5,7 @@ import { createVisualFixture } from './support/fixture-data.mjs';
 
 for (const language of ['en', 'zh-Hans']) {
   for (const reference of [false, true]) {
-    test(`pricing source remains visible: ${language}, reference=${reference}`, async ({ page }) => {
+    test(`pricing source remains available: ${language}, reference=${reference}`, async ({ page }) => {
       const data = createVisualFixture();
       data.settings.config.language = language;
       const detailed = data.dashboard.codex.snapshot.local.detailed_usage;
@@ -18,13 +18,14 @@ for (const language of ['en', 'zh-Hans']) {
       await page.addInitScript(data => { window.__CODEXU_VISUAL_DATA__ = data; }, data);
       await page.goto('/visual-test.html?surface=overview');
       const month = page.locator('.dashboard-home-monthly-progress');
-      await expect(month).toContainText('123.45');
+      const amount = month.getByText('≈$123.45', { exact: true });
+      await expect(amount).toBeVisible();
+      await expect(month).not.toContainText(language === 'en' ? 'estimate' : '估算');
       await expect(month).not.toContainText(language === 'en' ? 'no usage' : '尚无用量');
       if (reference) {
-        await expect(month).toContainText(language === 'en' ? 'reference estimate' : '参考估算');
-        await expect(month).toContainText('≈');
+        await expect(amount).toHaveAttribute('title', language === 'en' ? 'Some records use reference pricing.' : '部分记录使用参考价格。');
       } else {
-        await expect(month).not.toContainText('≈');
+        await expect(amount).not.toHaveAttribute('title');
       }
     });
   }

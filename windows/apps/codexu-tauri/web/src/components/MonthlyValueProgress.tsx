@@ -45,10 +45,7 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
   return (
     <section className="glass-panel p-4 sm:p-5 dashboard-home-monthly-progress" aria-label={t('monthly.title')}>
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h3 className="text-sm font-semibold text-primary">{t('monthly.title')}</h3>
-          <p className="text-xs text-tertiary mt-1">{t(detailed.month.uses_reference_pricing ? 'monthly.referenceEstimate' : 'monthly.estimate')}</p>
-        </div>
+        <h3 className="text-sm font-semibold text-primary">{t('monthly.title')}</h3>
         <p className="text-xs text-tertiary text-right">{t('monthly.reference')}</p>
       </div>
 
@@ -68,10 +65,10 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
       </div>
 
       <p className="mt-2 text-xs text-primary">
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5" title={detailed.month.uses_reference_pricing ? t('dashboard.metrics.referenceCostNote') : undefined}>
           <BadgeDollarSign size={14} />
-          {t('monthly.estimated', {
-            value: `${detailed.month.uses_reference_pricing ? '≈' : ''}${formatUSD(monthCost)}`,
+          {t('monthly.cost', {
+            value: formatUSD(monthCost),
             suffix: monthCost === 0 ? t('monthly.noUsageSuffix') : '',
           })}
         </span>

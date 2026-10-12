@@ -195,10 +195,8 @@ const en = {
     insufficient: 'Local estimate unavailable',
     noDetailedData: 'No detailed monthly data',
     tokens: 'This month: {value} tokens',
-    estimate: 'Local API estimate',
-    referenceEstimate: 'Local API reference estimate',
     reference: 'Reference ceiling: $46.5K',
-    estimated: 'Estimated: ${value}{suffix}',
+    cost: '≈${value}{suffix}',
     noUsageSuffix: ' (no usage yet this month)',
   },
   projects: {
@@ -492,10 +490,8 @@ const zhHans: MessageShape<typeof en> = {
     insufficient: '本地估算不可用',
     noDetailedData: '暂无详细月度数据',
     tokens: '本月用量：{value} Token',
-    estimate: '本地 API 估算',
-    referenceEstimate: '本地 API 参考估算',
     reference: '参考上限：$46.5K',
-    estimated: '估算：${value}{suffix}',
+    cost: '≈${value}{suffix}',
     noUsageSuffix: '（本月尚无用量）',
   },
   projects: {
