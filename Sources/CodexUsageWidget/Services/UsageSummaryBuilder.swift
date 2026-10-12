@@ -26,11 +26,12 @@ struct UsageProjectionCursor: Codable, Equatable {
 /// are immutable; a replacement with no day rows still replaces the previous contribution.
 extension UsageIndexStore {
     func ensureProjectionContext(root: String, statistics: StatisticsContext, now: Date) throws -> String {
-        let identity = root + "\n" + statistics.resolvedIdentifier + "\n2\n1"
+        let priceHash = SHA256.hash(data: ModelPricingCatalog.data).map { String(format: "%02x", $0) }.joined()
+        let identity = root + "\n" + statistics.resolvedIdentifier + "\n2\n" + priceHash
         let id = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
         try execute("""
             INSERT OR IGNORE INTO projection_context(id,root_id,timezone_id,formula_version,price_version,created_at_ms)
-            VALUES (?,?,?,2,1,?)
+            VALUES (?,?,?,2,2,?)
             """, [.text(id), .text(root), .text(statistics.resolvedIdentifier), .integer(try usageIndexMilliseconds(now))])
         return id
     }
