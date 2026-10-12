@@ -195,7 +195,7 @@ For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md
 
 ## Data Sources
 
-- Executable discovery: resolve ChatGPT/Codex by bundle identity, supporting the nested `codex-cli/CodexCLI.app`, `codex-cli/bin/codex`, legacy app layouts, and standard CLI locations.
+- Executable discovery: resolve ChatGPT/Codex by bundle identity, supporting the nested `codex-cli/CodexCLI.app`, `codex-cli/bin/codex`, legacy app layouts, and standard CLI locations. macOS preserves their existing selection order and checks `~/.local/bin/codex` only when all of them are unavailable.
 - Account and quota: `codex app-server` JSON-RPC methods `account/read`, `account/rateLimits/read`, and `account/usage/read`.
 - Local token totals: `~/.codex/state_5.sqlite`.
 - Detailed token splits: `token_count` events in `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/*.jsonl`.
