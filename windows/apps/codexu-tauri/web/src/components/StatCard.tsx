@@ -4,12 +4,13 @@ interface StatCardProps {
   label: string;
   value: string;
   subValue?: string;
+  subValueTitle?: string;
   icon?: ReactNode;
   accent?: 'primary' | 'secondary' | 'tertiary';
   compact?: boolean;
 }
 
-export function StatCard({ label, value, subValue, icon, accent = 'primary', compact = false }: StatCardProps) {
+export function StatCard({ label, value, subValue, subValueTitle, icon, accent = 'primary', compact = false }: StatCardProps) {
   const accentClass =
     accent === 'primary'
       ? 'bg-data-primary/20 text-data-primary'
@@ -28,7 +29,7 @@ export function StatCard({ label, value, subValue, icon, accent = 'primary', com
       <div className={compact ? 'min-w-0 flex-1' : ''}>
         <p className={contentClass}>{label}</p>
         <p className={valueClass}>{value}</p>
-        {subValue && <p className={subValueClass}>{subValue}</p>}
+        {subValue && <p className={subValueClass} title={subValueTitle}>{subValue}</p>}
       </div>
       {icon && (
         <div className={`${iconClass} ${accentClass} border border-current/20`} aria-hidden="true">

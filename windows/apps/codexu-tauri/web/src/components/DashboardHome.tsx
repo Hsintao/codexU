@@ -92,15 +92,16 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
 
         <QuotaOverview snapshot={snapshot} sourceLabel={quotaSourceLabel} onRefresh={onQuotaRefresh} />
 
-        <section className="dashboard-home-metrics" aria-label={t('dashboard.aria.localTokenMetrics')}>
+        <section className="dashboard-home-metrics" aria-label={t('dashboard.aria.localTokenMetrics')} aria-describedby={detailed ? 'dashboard-cost-note' : undefined}>
           <StatCard
             label={t('dashboard.metrics.today')}
             value={formatQuantity(hasUsage ? usage?.today_tokens ?? null : null)}
             subValue={
               detailed
-                ? t(detailed.today.uses_reference_pricing ? 'dashboard.metrics.referenceEstimated' : 'dashboard.metrics.estimated', { value: formatUSD(detailed.today.estimated_cost_usd) })
+                ? t(detailed.today.uses_reference_pricing ? 'dashboard.metrics.referenceCost' : 'dashboard.metrics.cost', { value: formatUSD(detailed.today.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
+            subValueTitle={detailed?.today.uses_reference_pricing ? t('dashboard.metrics.referenceCostNote') : undefined}
             icon={<Activity size={16} />}
             compact
             accent="primary"
@@ -110,9 +111,10 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.seven_day_tokens ?? null : null)}
             subValue={
               detailed
-                ? t(detailed.seven_day.uses_reference_pricing ? 'dashboard.metrics.referenceEstimated' : 'dashboard.metrics.estimated', { value: formatUSD(detailed.seven_day.estimated_cost_usd) })
+                ? t(detailed.seven_day.uses_reference_pricing ? 'dashboard.metrics.referenceCost' : 'dashboard.metrics.cost', { value: formatUSD(detailed.seven_day.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
+            subValueTitle={detailed?.seven_day.uses_reference_pricing ? t('dashboard.metrics.referenceCostNote') : undefined}
             icon={<Calendar size={16} />}
             compact
             accent="secondary"
@@ -122,13 +124,19 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.lifetime_tokens ?? null : null)}
             subValue={
               detailed
-                ? t(detailed.lifetime.uses_reference_pricing ? 'dashboard.metrics.referenceEstimated' : 'dashboard.metrics.estimated', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })
+                ? t(detailed.lifetime.uses_reference_pricing ? 'dashboard.metrics.referenceCost' : 'dashboard.metrics.cost', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
+            subValueTitle={detailed?.lifetime.uses_reference_pricing ? t('dashboard.metrics.referenceCostNote') : undefined}
             icon={<TrendingUp size={16} />}
             compact
             accent="tertiary"
           />
+          {detailed && (
+            <p id="dashboard-cost-note" className="col-span-full text-xs text-secondary">
+              {t('dashboard.metrics.costNote')}
+            </p>
+          )}
         </section>
 
         <div className="dashboard-home-monthly">
