@@ -123,7 +123,7 @@ impl<'de> Visitor<'de> for Projection {
     }
 }
 
-pub(super) fn read<R: BufRead>(reader: &mut R) -> anyhow::Result<(Value, u64, bool)> {
+pub(super) fn read<R: BufRead>(reader: &mut R) -> anyhow::Result<(Option<Value>, u64, bool)> {
     let budget = Rc::new(Budget {
         remaining: Cell::new(MAX_LINE_BYTES),
         active: Cell::new(true),
@@ -145,6 +145,9 @@ pub(super) fn read<R: BufRead>(reader: &mut R) -> anyhow::Result<(Value, u64, bo
         decoder.end()?;
         Ok::<_, serde_json::Error>(value)
     })();
+    if parsed.as_ref().is_err_and(|error| error.is_eof()) && !record.newline {
+        return Ok((None, record.bytes, false));
+    }
     let value = parsed.map_err(|error| {
         if budget.exceeded.get() {
             HistoryReadError::ResourceLimited
@@ -154,5 +157,5 @@ pub(super) fn read<R: BufRead>(reader: &mut R) -> anyhow::Result<(Value, u64, bo
             HistoryReadError::InvalidRecord
         }
     })?;
-    Ok((value, record.bytes, record.newline))
+    Ok((Some(value), record.bytes, record.newline))
 }
