@@ -586,10 +586,6 @@ pub fn truncate_title(title: &str) -> String {
 
 /// Estimates USD cost from a token breakdown and an optional model name.
 ///
-/// Supports Claude and OpenAI/Codex model families with approximate list prices.
-/// Prices are per-million-tokens and are best-effort; update them when official
-/// pricing changes. When the model is unknown the cost is zero.
-
 #[derive(Debug, Default)]
 struct ProjectAccumulator {
     path: String,
