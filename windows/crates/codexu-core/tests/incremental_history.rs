@@ -115,6 +115,53 @@ async fn malformed_large_image_output_does_not_publish_partial_history() {
 }
 
 #[tokio::test]
+async fn incomplete_large_image_tail_waits_for_completion_and_restart() {
+    let temp = tempdir().unwrap();
+    let file = setup(temp.path());
+    let cache = temp.path().join("cache");
+    std::fs::write(&file, meta("large-tail", None) + &event("a", 100, 100)).unwrap();
+    large_output(&file, b"");
+    let reader = CodexTranscriptReader::new(&cache);
+    for _ in 0..2 {
+        assert_eq!(
+            reader
+                .load_local_usage(temp.path(), Utc::now())
+                .await
+                .unwrap()
+                .unwrap()
+                .lifetime_tokens,
+            100
+        );
+    }
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap()
+        .write_all(("\"}]}}\n".to_owned() + &event("b", 200, 300)).as_bytes())
+        .unwrap();
+    let restarted = CodexTranscriptReader::new(&cache);
+    assert_eq!(
+        restarted
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .lifetime_tokens,
+        300
+    );
+    assert_eq!(
+        restarted
+            .with_integrity_scan()
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .lifetime_tokens,
+        300
+    );
+}
+
+#[tokio::test]
 async fn multiple_model_calls_in_one_turn_and_cumulative_only_history_are_counted_as_deltas() {
     let temp = tempdir().unwrap();
     let file = setup(temp.path());
@@ -175,7 +222,7 @@ async fn sqlite_checkpoint_survives_restart_and_publication_waits_for_complete_i
         .open(&file)
         .unwrap();
     out.write_all(event("b", 200, 300).as_bytes()).unwrap();
-    out.write_all(b"{unfinished").unwrap();
+    out.write_all(b"{broken\n").unwrap();
     drop(out);
     assert!(reader
         .load_local_usage(temp.path(), Utc::now())
@@ -274,10 +321,15 @@ async fn committed_checkpoint_resumes_after_incomplete_tail_without_recounting()
     let final_line = event("last", 1, 261);
     out.write_all(&final_line.as_bytes()[..20]).unwrap();
     drop(out);
-    assert!(reader
-        .load_local_usage(temp.path(), Utc::now())
-        .await
-        .is_err());
+    assert_eq!(
+        reader
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .lifetime_tokens,
+        260
+    );
     let db = Connection::open(database_path(&cache)).unwrap();
     let checkpoint: i64 = db
         .query_row("SELECT checkpoint FROM source", [], |r| r.get(0))

@@ -46,8 +46,6 @@ struct Source {
 
 struct Stamp {
     identity: String,
-    size: i64,
-    modified: i64,
     head: String,
     boundary: String,
 }
@@ -196,10 +194,6 @@ fn load_inner(
         }
         check_budget(&path)?;
     }
-    // Verify every path again before selecting the staged facts for publication.
-    for entry in index {
-        verify_source(&db, &root_id, entry)?;
-    }
     let summaries = materialize(&db, &root_id, scan)?;
     publish_days(
         &mut db,
@@ -231,15 +225,15 @@ fn refresh_source(
 ) -> anyhow::Result<()> {
     let path = entry.path.to_string_lossy().to_string();
     let mut file = File::open(&entry.path).map_err(|_| HistoryReadError::Unavailable)?;
-    check_fingerprint(&file, entry)?;
     let identity = file_identity(&file)?;
-    let fingerprint = entry
-        .fingerprint
-        .as_ref()
-        .ok_or(HistoryReadError::Unavailable)?;
-    let modified = fingerprint
-        .modification_time_ns
-        .ok_or(HistoryReadError::Unavailable)?;
+    // Discovery may predate a normal append. Use this open file's metadata to
+    // decide whether its own cached records need refreshing.
+    let metadata_now = file.metadata().map_err(|_| HistoryReadError::Unavailable)?;
+    let file_size = metadata_now.len() as i64;
+    let modified = metadata_now
+        .modified()?
+        .duration_since(UNIX_EPOCH)?
+        .as_nanos() as i64;
     let stored=db.query_row("SELECT id,identity,file_size,modified_ns,checkpoint,head_digest,boundary_digest,state_json,complete FROM source WHERE root_id=?1 AND path=?2",params![root,path],|r| {
         Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?,r.get::<_,bool>(8)?))
     }).optional()?;
@@ -284,7 +278,7 @@ fn refresh_source(
         };
     let unchanged = source.complete
         && source.identity == identity
-        && source.size == fingerprint.file_size
+        && source.size == file_size
         && source.modified == modified;
     if unchanged && !integrity_scan {
         db.execute(
@@ -307,7 +301,7 @@ fn refresh_source(
         return Ok(());
     }
     metrics.parsed_files += 1;
-    let prefix = if source.offset <= fingerprint.file_size {
+    let prefix = if source.offset <= file_size {
         Some(stamp(&mut file, source.offset, metrics)?)
     } else {
         None
@@ -315,7 +309,7 @@ fn refresh_source(
     let append = prefix.as_ref().is_some_and(|s| {
         s.identity == source.identity && s.head == source.head && s.boundary == source.boundary
     }) && !integrity_scan
-        && (!source.complete || fingerprint.file_size > source.size);
+        && (!source.complete || file_size > source.size);
     if !append {
         metrics.rebuilt_files += 1;
         source.offset = 0;
@@ -369,9 +363,11 @@ fn refresh_source(
                 let (object, consumed, terminated) = super::codex_large_record::read(&mut reader)?;
                 offset = line_offset + consumed as i64;
                 metrics.parser_read_bytes += consumed;
-                source
-                    .state
-                    .consume_object(db, source.id, line_offset, &object)?;
+                if let Some(object) = object {
+                    source
+                        .state
+                        .consume_object(db, source.id, line_offset, &object)?;
+                }
                 if !terminated {
                     break;
                 }
@@ -408,13 +404,16 @@ fn refresh_source(
         }
         // A complete JSON record at EOF is usable even without a newline. Its
         // facts are re-read on growth from the preceding newline checkpoint.
-        if !line.iter().all(u8::is_ascii_whitespace) {
-            source.state.consume(db, source.id, line_offset, &line)?;
+        if let Some(object) = super::history_integrity::read_json_record(&line, false)? {
+            source
+                .state
+                .consume_object(db, source.id, line_offset, &object)?;
         }
         let mut file = reader.get_mut();
         let final_stamp = stamp(&mut file, checkpoint_offset, metrics)?;
-        check_fingerprint(&file, entry)?;
-        db.execute("UPDATE source SET identity=?2,file_size=?3,modified_ns=?4,checkpoint=?5,head_digest=?6,boundary_digest=?7,state_json=?8,complete=1 WHERE id=?1",params![source.id,final_stamp.identity,final_stamp.size,final_stamp.modified,checkpoint_offset,final_stamp.head,final_stamp.boundary,serde_json::to_string(&checkpoint_state)?])?;
+        // Do not mark bytes appended after EOF as already consumed. Growth after
+        // this read invalidates this file on the next refresh.
+        db.execute("UPDATE source SET identity=?2,file_size=?3,modified_ns=?4,checkpoint=?5,head_digest=?6,boundary_digest=?7,state_json=?8,complete=1 WHERE id=?1",params![source.id,final_stamp.identity,offset,modified,checkpoint_offset,final_stamp.head,final_stamp.boundary,serde_json::to_string(&checkpoint_state)?])?;
         db.execute_batch("COMMIT")?;
         metrics.checkpoint_commits += 1;
         // The complete observed header includes a valid unterminated EOF record;
@@ -478,42 +477,6 @@ fn commit_checkpoint(
     Ok(())
 }
 
-fn check_fingerprint(file: &File, entry: &CodexRolloutIndexEntry) -> anyhow::Result<()> {
-    let metadata = file.metadata().map_err(|_| HistoryReadError::Unavailable)?;
-    let modified = metadata
-        .modified()
-        .map_err(|_| HistoryReadError::Unavailable)?
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| HistoryReadError::Unavailable)?
-        .as_nanos() as i64;
-    let fp = entry
-        .fingerprint
-        .as_ref()
-        .ok_or(HistoryReadError::Unavailable)?;
-    if metadata.len() as i64 != fp.file_size || Some(modified) != fp.modification_time_ns {
-        return Err(HistoryReadError::SourceChanged.into());
-    }
-    Ok(())
-}
-
-fn verify_source(
-    db: &Connection,
-    root: &str,
-    entry: &CodexRolloutIndexEntry,
-) -> anyhow::Result<()> {
-    let file = File::open(&entry.path).map_err(|_| HistoryReadError::Unavailable)?;
-    check_fingerprint(&file, entry)?;
-    let stored: String = db.query_row(
-        "SELECT identity FROM source WHERE root_id=?1 AND path=?2",
-        params![root, entry.path.to_string_lossy()],
-        |r| r.get(0),
-    )?;
-    if file_identity(&file)? != stored {
-        return Err(HistoryReadError::SourceChanged.into());
-    }
-    Ok(())
-}
-
 fn stamp(file: &mut File, offset: i64, metrics: &mut HistoryIndexMetrics) -> anyhow::Result<Stamp> {
     let before = file.metadata().map_err(|_| HistoryReadError::Unavailable)?;
     if offset < 0 || before.len() < offset as u64 {
@@ -530,13 +493,11 @@ fn stamp(file: &mut File, offset: i64, metrics: &mut HistoryIndexMetrics) -> any
         .map_err(|_| HistoryReadError::SourceChanged)?;
     metrics.validation_read_bytes += 2 * count as u64;
     let after = file.metadata().map_err(|_| HistoryReadError::Unavailable)?;
-    if before.len() != after.len() || before.modified()? != after.modified()? {
+    if after.len() < offset as u64 {
         return Err(HistoryReadError::SourceChanged.into());
     }
     Ok(Stamp {
         identity: file_identity(file)?,
-        size: after.len() as i64,
-        modified: after.modified()?.duration_since(UNIX_EPOCH)?.as_nanos() as i64,
         head,
         boundary: hex(&data),
     })
@@ -896,7 +857,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn final_source_check_rejects_replacement_with_matching_size_and_mtime() {
+    async fn per_file_refresh_rebuilds_replacement_with_matching_size_and_mtime() {
         let temp = tempfile::tempdir().unwrap();
         let cache = temp.path().join("cache");
         std::fs::create_dir(temp.path().join("sessions")).unwrap();
@@ -912,7 +873,7 @@ mod tests {
             .unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         let replacement = temp.path().join("new.jsonl");
-        std::fs::write(&replacement, &contents).unwrap();
+        std::fs::write(&replacement, event(2)).unwrap();
         OpenOptions::new()
             .write(true)
             .open(&replacement)
@@ -921,16 +882,55 @@ mod tests {
             .unwrap();
         std::fs::remove_file(&path).unwrap();
         std::fs::rename(replacement, &path).unwrap();
-        let db = Connection::open(database_path(&cache)).unwrap();
-        let error = verify_source(
-            &db,
-            &hex(temp.path().to_string_lossy().as_bytes()),
-            &index[0],
+        let summaries = load(
+            temp.path(),
+            &cache,
+            &index,
+            &HashMap::new(),
+            StatisticsTimeZone::Local,
+            Utc::now(),
+            false,
         )
-        .unwrap_err();
-        assert!(matches!(
-            error.downcast_ref::<HistoryReadError>(),
-            Some(HistoryReadError::SourceChanged)
-        ));
+        .unwrap();
+        assert!(summaries[0].deltas[0]
+            .turn_id
+            .as_ref()
+            .unwrap()
+            .contains("t-2"));
+    }
+
+    #[tokio::test]
+    async fn append_after_discovery_is_read_per_file() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("sessions")).unwrap();
+        let path = temp.path().join("sessions/a.jsonl");
+        std::fs::write(&path, event(1)).unwrap();
+        let index = super::super::index_codex_rollout_files(temp.path())
+            .await
+            .unwrap();
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(event(2).as_bytes())
+            .unwrap();
+        let summaries = load(
+            temp.path(),
+            &temp.path().join("cache"),
+            &index,
+            &HashMap::new(),
+            StatisticsTimeZone::Local,
+            Utc::now(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            summaries[0]
+                .deltas
+                .iter()
+                .map(|d| d.tokens.total_tokens)
+                .sum::<i64>(),
+            2
+        );
     }
 }

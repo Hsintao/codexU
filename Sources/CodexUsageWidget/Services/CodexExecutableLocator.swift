@@ -15,7 +15,8 @@ enum CodexExecutableLocator {
         return resolve(applicationURLs: applications, cliPaths: [
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
-            "/usr/bin/codex"
+            "/usr/bin/codex",
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/codex").path
         ])
     }
 

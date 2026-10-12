@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use crate::models::leadership::LeadershipDashboardSnapshot;
 use chrono::{DateTime, Utc};
 
-use super::history_integrity::ensure_history_unchanged;
 use crate::models::*;
 use crate::readers::{
     build_leadership_snapshot, index_codex_rollout_files, CodexAppServerQuotaSnapshot,
@@ -145,8 +144,6 @@ impl CodexDashboardProvider {
                 .load_from_index(&rollout_index, now)
                 .await?;
         }
-
-        ensure_history_unchanged(&rollout_index).await?;
 
         Ok(Some(CodexDashboardSnapshot {
             codex: build_codex_runtime_snapshot(local_usage, None, now),
@@ -386,8 +383,8 @@ mod tests {
         assert!(snapshot.is_some());
         assert_eq!(
             crate::readers::common::rollout_io_counts(),
-            (1, 4),
-            "one shared enumeration plus fingerprint checks at discovery, usage-cache, inference-cache and dashboard publication"
+            (1, 2),
+            "one shared enumeration plus per-file discovery and inference-cache fingerprints"
         );
     }
 

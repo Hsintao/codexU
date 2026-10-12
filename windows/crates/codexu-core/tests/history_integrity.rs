@@ -88,20 +88,74 @@ async fn unavailable_root_and_failed_directory_scan_are_not_empty_history() {
 }
 
 #[tokio::test]
-async fn source_change_is_rejected_before_publication() {
-    use codexu_core::readers::history_integrity::{ensure_history_unchanged, HistoryReadError};
-    use codexu_core::readers::index_codex_rollout_files;
+async fn ongoing_appends_publish_complete_records_and_converge_without_duplicates() {
+    use std::io::Write;
     let temp = tempdir().unwrap();
     let sessions = temp.path().join("sessions");
     std::fs::create_dir(&sessions).unwrap();
     let file = sessions.join("rollout-a.jsonl");
     write_usage(&file, "a", 300);
-    let index = index_codex_rollout_files(temp.path()).await.unwrap();
-    write_usage(&file, "a", 10000);
-    assert!(matches!(
-        ensure_history_unchanged(&index).await,
-        Err(HistoryReadError::SourceChanged)
-    ));
+    let writer = std::thread::spawn(move || {
+        let mut out = std::fs::OpenOptions::new().append(true).open(file).unwrap();
+        for n in 1..=500 {
+            let event = serde_json::json!({"timestamp":"2026-10-10T00:00:01Z","type":"event_msg",
+                "payload":{"type":"token_count","turn_id":format!("t-{n}"),"info":{
+                    "last_token_usage":{"input_tokens":1,"total_tokens":1}}}});
+            writeln!(out, "{event}").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    });
+    let reader = CodexTranscriptReader::new(temp.path().join("cache"));
+    let mut previous = 300;
+    for _ in 0..4 {
+        let usage = reader
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(usage.lifetime_tokens >= previous);
+        previous = usage.lifetime_tokens;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    writer.join().unwrap();
+    for _ in 0..2 {
+        let usage = reader
+            .load_local_usage(temp.path(), Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(usage.lifetime_tokens, 800);
+    }
+}
+
+#[tokio::test]
+async fn incomplete_inference_tail_is_deferred_but_terminated_invalid_record_preserves_cache() {
+    use std::io::Write;
+    let temp = tempdir().unwrap();
+    let sessions = temp.path().join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let file = sessions.join("a.jsonl");
+    write_usage(&file, "a", 300);
+    let cache = temp.path().join("cache");
+    let reader = InferencePerformanceReader::new(&cache);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap()
+        .write_all(b"{\"payload\":")
+        .unwrap();
+    assert!(reader.load(temp.path(), Utc::now()).await.is_ok());
+    let cache_file = cache.join("codex/inference-performance-v1.json");
+    let previous = std::fs::read(&cache_file).unwrap();
+    // A newline ends the record: this EOF-shaped parse error is now genuine corruption.
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap()
+        .write_all(b"\n")
+        .unwrap();
+    assert!(reader.load(temp.path(), Utc::now()).await.is_err());
+    assert_eq!(std::fs::read(cache_file).unwrap(), previous);
 }
 
 #[cfg(windows)]

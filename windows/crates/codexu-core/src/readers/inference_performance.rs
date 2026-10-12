@@ -6,12 +6,10 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::common::{
-    index_codex_rollout_files, CodexRolloutIndexEntry, FileFingerprint, MAX_LINE_BYTES,
-    READ_CHUNK_BYTES,
+    fingerprint_for, index_codex_rollout_files, CodexRolloutIndexEntry, FileFingerprint,
+    MAX_LINE_BYTES, READ_CHUNK_BYTES,
 };
-use super::history_integrity::{
-    ensure_history_unchanged, write_cache_atomically, HistoryReadError,
-};
+use super::history_integrity::{read_json_record, write_cache_atomically, HistoryReadError};
 use crate::models::{
     InferencePerformanceArchive, InferencePerformanceBuilder, InferencePerformanceHistory,
     InferencePerformanceSample, TokenBreakdown, INFERENCE_MINIMUM_CALL_DURATION_SECONDS,
@@ -19,7 +17,7 @@ use crate::models::{
 use crate::StatisticsTimeZone;
 
 const INFERENCE_CACHE_VERSION: i32 = 2;
-const INFERENCE_PARSER_VERSION: i32 = 3;
+const INFERENCE_PARSER_VERSION: i32 = 4;
 const MAXIMUM_ARCHIVE_BYTES: u64 = 32 * 1024 * 1024;
 const MAXIMUM_SAMPLE_COUNT: usize = 50_000;
 
@@ -126,29 +124,28 @@ impl InferencePerformanceReader {
             HashMap::new();
         for indexed in index {
             let file = &indexed.path;
+            let fingerprint = fingerprint_for(file)
+                .await
+                .ok_or(HistoryReadError::Unavailable)?;
             let key = source_identifier(file);
-            let cached = indexed.fingerprint.as_ref().and_then(|fingerprint| {
-                cache
-                    .entries
-                    .get(&key)
-                    .filter(|entry| entry.matches(fingerprint))
-                    .map(|entry| entry.parsed.clone())
-            });
+            let cached = cache
+                .entries
+                .get(&key)
+                .filter(|entry| entry.matches(&fingerprint))
+                .map(|entry| entry.parsed.clone());
             let parsed = if let Some(parsed) = cached {
                 parsed
             } else {
                 let parsed = parse_inference_samples(file).await?;
-                if let Some(fingerprint) = indexed.fingerprint {
-                    cache.entries.insert(
-                        key,
-                        InferenceFileCacheEntry {
-                            file_size: fingerprint.file_size,
-                            modification_time_ns: fingerprint.modification_time_ns,
-                            parser_version: INFERENCE_PARSER_VERSION,
-                            parsed: parsed.clone(),
-                        },
-                    );
-                }
+                cache.entries.insert(
+                    key,
+                    InferenceFileCacheEntry {
+                        file_size: fingerprint.file_size,
+                        modification_time_ns: fingerprint.modification_time_ns,
+                        parser_version: INFERENCE_PARSER_VERSION,
+                        parsed: parsed.clone(),
+                    },
+                );
                 parsed
             };
             samples_by_source_id
@@ -156,7 +153,6 @@ impl InferencePerformanceReader {
                 .or_default()
                 .extend(parsed.samples);
         }
-        ensure_history_unchanged(index).await?;
         for (source_id, samples) in samples_by_source_id {
             cache
                 .archive
@@ -249,7 +245,14 @@ async fn parse_inference_samples(path: &Path) -> Result<ParsedInferenceFile, His
 
         if newline.is_some() {
             if !oversized {
-                apply_inference_line(&line, &mut parsed, &mut tracker, &mut seen_sample_ids);
+                if let Some(object) = read_json_record(&line, true)? {
+                    apply_inference_object(
+                        &object,
+                        &mut parsed,
+                        &mut tracker,
+                        &mut seen_sample_ids,
+                    );
+                }
             }
             line.clear();
             oversized = false;
@@ -257,27 +260,20 @@ async fn parse_inference_samples(path: &Path) -> Result<ParsedInferenceFile, His
     }
 
     if !oversized {
-        apply_inference_line(&line, &mut parsed, &mut tracker, &mut seen_sample_ids);
+        if let Some(object) = read_json_record(&line, false)? {
+            apply_inference_object(&object, &mut parsed, &mut tracker, &mut seen_sample_ids);
+        }
     }
 
     Ok(parsed)
 }
 
-fn apply_inference_line(
-    line: &[u8],
+fn apply_inference_object(
+    object: &serde_json::Value,
     parsed: &mut ParsedInferenceFile,
     tracker: &mut InferenceCallTracker,
     seen_sample_ids: &mut HashSet<String>,
 ) {
-    if line.is_empty() {
-        return;
-    }
-    let Ok(text) = std::str::from_utf8(line) else {
-        return;
-    };
-    let Ok(object) = serde_json::from_str::<serde_json::Value>(text) else {
-        return;
-    };
     let Some(payload) = object.get("payload") else {
         return;
     };

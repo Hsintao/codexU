@@ -135,7 +135,7 @@ finally {
     }
 }
 
-$BundleRoots = @(
+[string[]]$BundleRoots = @(
     (Join-Path $WindowsRoot "target\release\bundle"),
     (Join-Path $AppRoot "target\release\bundle")
 ) | Where-Object { Test-Path -LiteralPath $_ }
@@ -176,10 +176,16 @@ foreach ($Artifact in $Artifacts) {
     Write-Host "Wrote $ChecksumPath"
 }
 
+$Program = Join-Path (Split-Path -Parent $BundleRoots[0]) 'codexu-tauri.exe'
+if (-not (Test-Path -LiteralPath $Program)) { throw 'Built application is missing.' }
+$SourceSha = (& git -C $RepoRoot rev-parse HEAD | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify packaged source.' }
 $Manifest = [ordered]@{
     product = "codexU"
     version = $Version
     target = "windows-x86_64"
+    source_sha = $SourceSha
+    program_sha256 = (Get-FileHash -LiteralPath $Program -Algorithm SHA256).Hash.ToLowerInvariant()
     installers = @($Artifacts.Name)
     generated_utc = [DateTime]::UtcNow.ToString("o")
 }

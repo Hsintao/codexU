@@ -15,14 +15,12 @@ chrono-tz = "0.10"
 thiserror.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
-tokio-tungstenite.workspace = true
-futures-util.workspace = true
 tracing.workspace = true
 rusqlite = { workspace = true, features = ["bundled", "chrono"] }
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_ProcessStatus", "Win32_System_Threading"] }
