@@ -69,6 +69,7 @@ pub struct CodexSkillLoad {
 /// A single usage delta extracted from a Codex transcript.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodexUsageDelta {
+    pub service_tier: Option<String>,
     pub turn_id: Option<String>,
     #[serde(with = "chrono::serde::ts_milliseconds")]
     pub date: DateTime<Utc>,
@@ -265,6 +266,7 @@ fn combine_session_metadata(
                     .deltas
                     .into_iter()
                     .map(|d| UsageDelta {
+                        service_tier: d.service_tier,
                         message_id: d.turn_id,
                         date: d.date,
                         tokens: d.tokens,

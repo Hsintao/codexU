@@ -458,6 +458,7 @@ fn parse_usage(value: &serde_json::Value) -> Option<TokenBreakdown> {
     Some(TokenBreakdown {
         input_tokens: i64_value(value.get("input_tokens"))?,
         cached_input_tokens: i64_value(value.get("cached_input_tokens")).unwrap_or(0),
+        cache_write_input_tokens: 0,
         output_tokens: i64_value(value.get("output_tokens"))?,
         reasoning_output_tokens: i64_value(value.get("reasoning_output_tokens")).unwrap_or(0),
         total_tokens: i64_value(value.get("total_tokens")).unwrap_or(0),

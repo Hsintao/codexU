@@ -36,7 +36,7 @@ pub(crate) fn rollout_io_counts() -> (usize, usize) {
 pub const MAX_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 pub const READ_CHUNK_BYTES: usize = 64 * 1024;
-pub const CACHE_VERSION: i32 = 2;
+pub const CACHE_VERSION: i32 = 3;
 
 /// A fingerprint for a transcript file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +56,7 @@ pub struct CodexRolloutIndexEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageDelta {
     pub message_id: Option<String>,
+    pub service_tier: Option<String>,
     pub date: DateTime<Utc>,
     pub tokens: TokenBreakdown,
     pub model: Option<String>,
@@ -234,7 +235,11 @@ pub fn make_local_usage_with_timezone(
     let mut projects: HashMap<String, ProjectAccumulator> = HashMap::new();
 
     for delta in &unique_deltas {
-        let cost = estimated_cost_usd(&delta.tokens, delta.model.as_deref());
+        let cost = crate::model_pricing::estimate(
+            &delta.tokens,
+            delta.model.as_deref(),
+            delta.service_tier.as_deref(),
+        );
         lifetime.add_tokens(&delta.tokens, cost);
         if delta.date >= month_start {
             month.add_tokens(&delta.tokens, cost);
@@ -267,7 +272,7 @@ pub fn make_local_usage_with_timezone(
                 path: project_path.clone(),
                 ..Default::default()
             });
-        acc.add(delta, cost);
+        acc.add(delta, cost.usd);
     }
 
     let daily_buckets = make_seven_day_buckets(&daily_usage, now, statistics);
@@ -581,45 +586,6 @@ pub fn truncate_title(title: &str) -> String {
 
 /// Estimates USD cost from a token breakdown and an optional model name.
 ///
-/// Supports Claude and OpenAI/Codex model families with approximate list prices.
-/// Prices are per-million-tokens and are best-effort; update them when official
-/// pricing changes. When the model is unknown the cost is zero.
-pub fn estimated_cost_usd(tokens: &TokenBreakdown, model: Option<&str>) -> f64 {
-    let model_lower = model.map(|m| m.to_lowercase());
-    let m = model_lower.as_deref();
-    let price = if m == Some("claude-opus") || m.map(|s| s.contains("opus")).unwrap_or(false) {
-        Some((15.0, 1.5, 75.0))
-    } else if m == Some("claude-sonnet") || m.map(|s| s.contains("sonnet")).unwrap_or(false) {
-        Some((3.0, 0.3, 15.0))
-    } else if m == Some("claude-haiku") || m.map(|s| s.contains("haiku")).unwrap_or(false) {
-        Some((0.8, 0.08, 4.0))
-    } else if m.map(|s| s.contains("gpt-5.5")).unwrap_or(false) {
-        // Approximate higher-tier GPT-5.5 pricing.
-        Some((5.0, 1.25, 20.0))
-    } else if m.map(|s| s.contains("gpt-5")).unwrap_or(false) {
-        // Approximate GPT-5.4 / base GPT-5 pricing.
-        Some((2.5, 0.625, 10.0))
-    } else if m.map(|s| s.contains("gpt-4o")).unwrap_or(false) {
-        Some((2.5, 1.25, 10.0))
-    } else if m.map(|s| s.contains("gpt-4")).unwrap_or(false) {
-        Some((10.0, 5.0, 30.0))
-    } else if m
-        .map(|s| s.contains("gpt-3.5") || s.contains("gpt-35"))
-        .unwrap_or(false)
-    {
-        Some((0.5, 0.25, 1.5))
-    } else {
-        None
-    };
-    let Some((input_price, cached_price, output_price)) = price else {
-        return 0.0;
-    };
-    let uncached_cost = tokens.uncached_input_tokens() as f64 / 1_000_000.0 * input_price;
-    let cached_cost = tokens.billable_cached_input_tokens() as f64 / 1_000_000.0 * cached_price;
-    let output_cost = tokens.output_tokens.max(0) as f64 / 1_000_000.0 * output_price;
-    uncached_cost + cached_cost + output_cost
-}
-
 #[derive(Debug, Default)]
 struct ProjectAccumulator {
     path: String,

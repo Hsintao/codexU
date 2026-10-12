@@ -1,6 +1,6 @@
 # 共享模型定价
 
-macOS 从 `Resources/model-pricing.json` 读取模型价格，打包为本地资源；运行时不请求报价服务。目录和共同算例独立于 Swift，可供 Windows 等其他实现复用。Windows 运行时接入另行交付。金额是本机 Token 按 API 价格折算的估算，不是订阅账单。
+macOS 与 Windows 只维护 `Resources/model-pricing.json` 一份价格数据。macOS 打包为本地资源，Rust 编译时嵌入同一个文件；运行时不请求报价服务。金额是本机 Token 按 API 价格折算的估算，不是订阅账单。
 
 单位为美元 / 百万 Token。新增模型或价格变动只更新该文件；模型名及显式别名匹配不区分大小写，允许日期快照后缀，未知变体不能继承一个看似相近的专属价格。
 
@@ -19,6 +19,6 @@ GPT-6 请求输入超过 272,000 时，整次输入及缓存费用乘 2，输出
 
 没有专属条目的模型按表内 GPT-5.5 参考价折算，并明确标注参考估算。未识别的服务层级按已知标准基准参考折算，不能冒充该层级的专属价格。Claude 的旧家族费率集中在共享表，并标记为参考价；本次没有重新核实各 Claude 版本的官方费率。区域处理、工具费等本地日志没有足够事实的项目不自动补收，因此估算不代表完整实际 API 账单。
 
-价格表字节摘要参与 macOS 费用投影身份，目录变化后重新生成派生费用。解析版本提升后，旧解析记录重新读取以补齐计费条件；真实日志不修改。
+价格表字节摘要参与 macOS 费用投影与 Windows 启动摘要身份。Windows 日归档和仪表盘每次由 Token 事实重算；设置事件按 turn ID 保留对应模型，交错 turn 不互相覆盖。旧派生索引缺少计费字段或使用旧模型归属规则时，在独占锁内丢弃并重建，不迁移旧派生金额；旧启动摘要同时失效。未知的更高 schema 版本保留并报错。真实日志不修改。
 
-共同算例在 `Resources/model-pricing-vectors.json`，包括输入、预期美元金额和参考标记。macOS 使用 `make test-model-pricing`，或在构建后运行 `build/codexU.app/Contents/MacOS/codexU --self-test-model-pricing`。Mac CI 构建后执行相同自测；其他平台可用该算例文件核对自身实现。
+共同算例在 `Resources/model-pricing-vectors.json`：Windows `cargo test -p codexu-core --test model_pricing`，macOS `codexU --self-test-model-pricing`。两端读取同样的输入、预期美元金额和参考标记，macOS 验证需真实 macOS runner。

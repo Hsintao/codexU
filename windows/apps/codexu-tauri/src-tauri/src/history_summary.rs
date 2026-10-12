@@ -12,6 +12,7 @@ const NAME: &str = "history-summary.json";
 #[derive(Serialize, Deserialize)]
 struct Summary {
     version: u8,
+    pricing: String,
     root: PathBuf,
     cache: PathBuf,
     calendar: i32,
@@ -33,7 +34,8 @@ pub fn load(directory: &Path, root: &Path, cache: &Path) -> Option<CodexDashboar
         return None;
     }
     let saved: Summary = serde_json::from_slice(&bytes).ok()?;
-    (saved.version == 1
+    (saved.version == 3
+        && saved.pricing == codexu_core::model_pricing::catalog_fingerprint()
         && saved.root == root
         && saved.cache == cache
         && saved.calendar == calendar())
@@ -71,7 +73,8 @@ pub async fn save(
         }
     }
     let bytes = serde_json::to_vec(&Summary {
-        version: 1,
+        version: 3,
+        pricing: codexu_core::model_pricing::catalog_fingerprint(),
         root: root.into(),
         cache: cache.into(),
         calendar: calendar(),
@@ -95,4 +98,35 @@ pub fn clear(directory: &Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn changed_catalog_rejects_summary_without_overwriting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("root");
+        let cache = directory.path().join("cache");
+        let dashboard = empty_dashboard(chrono::Utc::now());
+        save(directory.path(), &root, &cache, &dashboard)
+            .await
+            .unwrap();
+        assert!(load(directory.path(), &root, &cache).is_some());
+        let path = directory.path().join(NAME);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        value["version"] = 2.into();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(load(directory.path(), &root, &cache).is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        value["version"] = 3.into();
+        value["pricing"] = "obsolete-catalog".into();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(load(directory.path(), &root, &cache).is_none());
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
 }

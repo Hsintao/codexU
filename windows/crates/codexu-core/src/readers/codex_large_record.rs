@@ -98,6 +98,8 @@ impl<'de> Visitor<'de> for Projection {
                             | "cwd"
                             | "forked_from_id"
                             | "model"
+                            | "service_tier"
+                            | "thread_settings"
                             | "turn_id"
                             | "started_at"
                             | "completed_at"

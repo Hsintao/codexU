@@ -148,7 +148,20 @@ fn load_inner(
     db.busy_timeout(Duration::ZERO)?;
     db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA cache_size=-8192; PRAGMA temp_store=FILE; PRAGMA journal_size_limit=16777216;")?;
     let schema: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if schema != 0 && schema != 1 {
+    if schema == 1 || schema == 2 {
+        db.close().map_err(|_| HistoryReadError::CacheUnavailable)?;
+        for suffix in ["", "-journal", "-wal", "-shm"] {
+            let managed = PathBuf::from(format!("{}{suffix}", path.to_string_lossy()));
+            match std::fs::remove_file(managed) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(HistoryReadError::CacheUnavailable.into()),
+            }
+        }
+        db = Connection::open(&path)?;
+        db.busy_timeout(Duration::ZERO)?;
+        db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA cache_size=-8192; PRAGMA temp_store=FILE; PRAGMA journal_size_limit=16777216;")?;
+    } else if schema != 0 && schema != 3 {
         return Err(HistoryReadError::CacheUnavailable.into());
     }
     db.execute_batch(SCHEMA)?;
@@ -547,10 +560,10 @@ CREATE TABLE IF NOT EXISTS source(id INTEGER PRIMARY KEY,root_id TEXT NOT NULL,p
 CREATE TABLE IF NOT EXISTS fact(source INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,byte_offset INTEGER NOT NULL,kind TEXT NOT NULL,event_key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(source,byte_offset,kind),UNIQUE(source,event_key));
 CREATE TRIGGER IF NOT EXISTS fact_insert AFTER INSERT ON fact BEGIN UPDATE index_meta SET fact_count=fact_count+1; END;
 CREATE TRIGGER IF NOT EXISTS fact_delete AFTER DELETE ON fact BEGIN UPDATE index_meta SET fact_count=fact_count-1; END;
-CREATE TABLE IF NOT EXISTS turn_model(source INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,byte_offset INTEGER NOT NULL,turn_id TEXT NOT NULL,model TEXT NOT NULL,PRIMARY KEY(source,byte_offset));
+CREATE TABLE IF NOT EXISTS turn_model(source INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,byte_offset INTEGER NOT NULL,turn_id TEXT NOT NULL,model TEXT NOT NULL,service_tier TEXT,PRIMARY KEY(source,byte_offset));
 CREATE INDEX IF NOT EXISTS turn_lookup ON turn_model(source,turn_id,byte_offset);
 CREATE TABLE IF NOT EXISTS day_archive(generation INTEGER NOT NULL,day TEXT NOT NULL,root_id TEXT NOT NULL,usage_json TEXT NOT NULL,PRIMARY KEY(generation,day));
-PRAGMA user_version=1;
+PRAGMA user_version=3;
 "#;
 
 fn materialize(
@@ -688,7 +701,11 @@ fn publish_days(
         let day = statistics.day_key(delta.date);
         days.entry(day).or_default().add_tokens(
             &delta.tokens,
-            super::common::estimated_cost_usd(&delta.tokens, delta.model.as_deref()),
+            crate::model_pricing::estimate(
+                &delta.tokens,
+                delta.model.as_deref(),
+                delta.service_tier.as_deref(),
+            ),
         );
     }
     metrics.published_generation = scan;
