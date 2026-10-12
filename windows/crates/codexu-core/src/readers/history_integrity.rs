@@ -1,15 +1,13 @@
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use super::common::{fingerprint_for, CodexRolloutIndexEntry, FileFingerprint};
-
 /// A failed read is never an empty or complete history. Messages deliberately
 /// omit source paths, raw lines and low-level operating-system diagnostics.
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryReadError {
     #[error("Local history is temporarily unreadable. Refresh to retry.")]
     Unavailable,
-    #[error("Local history contains an incomplete or invalid record. Refresh to retry.")]
+    #[error("Local history contains an invalid record. Refresh to retry.")]
     InvalidRecord,
     #[error("Local history changed while being read. Refresh to retry.")]
     SourceChanged,
@@ -26,26 +24,20 @@ pub enum HistoryReadError {
 pub const RETAINED_HISTORY_MESSAGE: &str =
     "Local history could not be read completely; showing the last complete history. Refresh to retry.";
 
-pub async fn ensure_file_unchanged(
-    path: &Path,
-    expected: Option<&FileFingerprint>,
-) -> Result<(), HistoryReadError> {
-    let actual = fingerprint_for(path)
-        .await
-        .ok_or(HistoryReadError::Unavailable)?;
-    if Some(&actual) != expected {
-        return Err(HistoryReadError::SourceChanged);
+/// Only an EOF-truncated JSON tail may wait for the next append. A malformed
+/// complete line remains an error, including when its syntax error is at EOF.
+pub(super) fn read_json_record(
+    line: &[u8],
+    terminated: bool,
+) -> Result<Option<serde_json::Value>, HistoryReadError> {
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
     }
-    Ok(())
-}
-
-pub async fn ensure_history_unchanged(
-    index: &[CodexRolloutIndexEntry],
-) -> Result<(), HistoryReadError> {
-    for entry in index {
-        ensure_file_unchanged(&entry.path, entry.fingerprint.as_ref()).await?;
+    match serde_json::from_slice::<serde_json::Value>(line) {
+        Ok(value) if value.is_object() => Ok(Some(value)),
+        Err(error) if error.is_eof() && !terminated => Ok(None),
+        _ => Err(HistoryReadError::InvalidRecord),
     }
-    Ok(())
 }
 
 /// A failed cache write must not truncate a previously complete cache.
