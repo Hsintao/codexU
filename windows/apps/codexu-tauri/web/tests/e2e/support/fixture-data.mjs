@@ -150,11 +150,13 @@ function pricedUsage(total) {
     tokens: {
       input_tokens: input,
       cached_input_tokens: Math.round(input * 0.35),
+      cache_write_input_tokens: 0,
       output_tokens: output,
       reasoning_output_tokens: Math.round(output * 0.42),
       total_tokens: total,
     },
     estimated_cost_usd: Number((total / 100_000).toFixed(2)),
+    uses_reference_pricing: false,
   };
 }
 

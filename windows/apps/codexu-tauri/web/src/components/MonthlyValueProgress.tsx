@@ -47,7 +47,7 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-primary">{t('monthly.title')}</h3>
-          <p className="text-xs text-tertiary mt-1">{t('monthly.estimate')}</p>
+          <p className="text-xs text-tertiary mt-1">{t(detailed.month.uses_reference_pricing ? 'monthly.referenceEstimate' : 'monthly.estimate')}</p>
         </div>
         <p className="text-xs text-tertiary text-right">{t('monthly.reference')}</p>
       </div>
@@ -71,7 +71,7 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
         <span className="inline-flex items-center gap-1.5">
           <BadgeDollarSign size={14} />
           {t('monthly.estimated', {
-            value: formatUSD(monthCost),
+            value: `${detailed.month.uses_reference_pricing ? '≈' : ''}${formatUSD(monthCost)}`,
             suffix: monthCost === 0 ? t('monthly.noUsageSuffix') : '',
           })}
         </span>

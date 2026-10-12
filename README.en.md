@@ -75,7 +75,7 @@ The Windows version is an independent Tauri desktop implementation. The public W
 
 ## Value progress
 
-macOS reads model prices from a packaged local JSON catalog, including GPT-6 cache-read, cache-write and service-tier rates. Missing prices are explicitly marked as reference estimates. See [the model pricing catalog](docs/MODEL_PRICING.md) for sources and cache invalidation rules. Other platforms can reuse the catalog and calculation vectors; the app does not fetch prices at runtime.
+macOS and Windows use one packaged local model pricing catalog, including GPT-6 cache-read, cache-write and service-tier rates. Missing prices are explicitly marked as reference estimates. See [shared model pricing](docs/MODEL_PRICING.md) for sources and cache invalidation rules; the app does not fetch prices at runtime.
 
 Value progress estimates the current month's API-equivalent value from locally parsed Codex usage. Each request is priced with its recorded model and service tier, splitting input into ordinary uncached input, cache writes, and cached input before adding output-token cost. Recorded `priority` or `fast` requests use the published Fast mode API rates. Models with long-context pricing use the published long-context rates when one request exceeds 272K input tokens. Reasoning effort is not multiplied separately because reasoning tokens are already included in output usage. Prices come from OpenAI's live [API pricing page](https://developers.openai.com/api/docs/pricing) and the corresponding model pages.
 
