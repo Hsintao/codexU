@@ -35,7 +35,6 @@ use serde::{Deserialize, Serialize};
 
 use super::codex_state::CodexThreadMetadata;
 use super::common::*;
-use super::history_integrity::ensure_history_unchanged;
 use crate::models::*;
 use crate::StatisticsTimeZone;
 
@@ -226,7 +225,6 @@ impl CodexTranscriptReader {
             )
         })
         .await??;
-        ensure_history_unchanged(index).await?;
         Ok((!summaries.is_empty()).then_some(summaries))
     }
 }
