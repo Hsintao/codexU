@@ -1,4 +1,4 @@
-import { CheckCircle2, Gauge, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Gauge, RefreshCw, ShieldAlert } from 'lucide-react';
 import { type RateWindow, type UsageSnapshot } from '../types/models';
 import { useI18n } from '../i18n/I18nProvider';
 
@@ -54,7 +54,7 @@ export function QuotaOverview({ snapshot, sourceLabel, onRefresh }: QuotaOvervie
     { label: t('quota.sevenDay'), window: snapshot?.seven_day_quota },
     { label: t('quota.monthly'), window: snapshot?.monthly_quota },
   ].filter((entry): entry is { label: string; window: RateWindow } => entry.window != null);
-  const hasAuthoritativeEmptyQuota = snapshot?.quota_read_succeeded === true;
+  const quotaReadSucceeded = snapshot?.quota_read_succeeded === true;
   const hasQuota = quotaWindows.length > 0;
 
   return (
@@ -66,41 +66,28 @@ export function QuotaOverview({ snapshot, sourceLabel, onRefresh }: QuotaOvervie
           </span>
           <div>
             <h3>{t('quota.title')}</h3>
-            <p>{sourceLabel ?? t('quota.officialSource')}</p>
           </div>
         </div>
-        <span className={`dashboard-overview-status ${hasQuota ? 'dashboard-overview-status-confirmed' : ''}`}>
-          {hasQuota ? t('quota.officialSource') : hasAuthoritativeEmptyQuota ? t('quota.noActive') : t('quota.checking')}
+        <span title={sourceLabel ?? t('quota.officialSource')} className={`dashboard-overview-status ${hasQuota && quotaReadSucceeded ? 'dashboard-overview-status-confirmed' : ''}`}>
+          {hasQuota && !quotaReadSucceeded ? t('quota.savedBadge') : t('quota.officialBadge')}
         </span>
       </div>
 
       {hasQuota ? (
-        <>
-          <div className="quota-overview-state quota-overview-state-confirmed">
-            <div className="quota-overview-state-copy">
-              <CheckCircle2 size={18} aria-hidden="true" />
-              <div>
-              <strong>{t('quota.officialSource')}</strong>
-              <p>{t('quota.confirmedOnly')}</p>
-              </div>
-            </div>
-          </div>
           <div className="quota-overview-windows">
             {quotaWindows.map(({ label, window }) => (
               <QuotaWindow key={label} label={label} window={window} t={t} />
             ))}
           </div>
-        </>
       ) : (
         <div className="quota-overview-state quota-overview-state-empty">
           <div className="quota-overview-state-copy">
             <ShieldAlert size={18} aria-hidden="true" />
             <div>
-              <strong>{hasAuthoritativeEmptyQuota ? t('quota.noActive') : t('quota.checking')}</strong>
-              <p>{t('quota.confirmedOnly')}</p>
+              <strong>{quotaReadSucceeded ? t('quota.noActive') : t('quota.checking')}</strong>
             </div>
           </div>
-          {!hasAuthoritativeEmptyQuota ? (
+          {!quotaReadSucceeded ? (
             <button onClick={onRefresh} className="quota-overview-refresh glass-button" type="button">
               <RefreshCw size={13} aria-hidden="true" />
               {t('quota.retry')}

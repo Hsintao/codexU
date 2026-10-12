@@ -4,7 +4,7 @@
 
 ## A First-of-Its-Kind AI Leadership Assessment Model
 
-codexU v1.3.1 adds on-device inference performance monitoring to its AI leadership model and completes the independent Windows x86_64 Tauri Dashboard. All processing remains local and independent from the existing quota, usage, trend, and task data paths.
+codexU v1.3.2 restores macOS quota reads after the ChatGPT upgrade and improves history loading with local incremental indexing, bounded home summaries, and expired report cleanup. The independent Windows x86_64 Tauri Dashboard remains available; usage and task data stay local.
 
 - **See the AI organization at a glance:** score, 28-day led agents, AI hours, and peak concurrency sit beside a live command-radius orbit driven by today's agents.
 - **No token-based score inflation:** only locally verifiable or derived worker lifecycles, parent-child relationships, concurrency, and autonomous runs count. Unreliable cost, delivery, and estimated intervals stay outside the score.
@@ -13,20 +13,22 @@ codexU v1.3.1 adds on-device inference performance monitoring to its AI leadersh
 - **Local and private:** evaluation stays on your Mac and does not upload usage, threads, paths, logs, or account data.
 
 > [!IMPORTANT]
-> **Upgrade to v1.3.1 or later.** v1.3.1 completes the Windows x86_64 Dashboard and includes the on-device inference-performance and aggregation-boundary updates. [Download the latest release](https://github.com/shanggqm/codexU/releases/latest).
+> **Upgrade to v1.3.2 or later.** v1.3.2 supports the new bundled ChatGPT CLI layout and fixes macOS history-cache cleanup and preservation of complete statistics. [Download the latest release](https://github.com/shanggqm/codexU/releases/latest).
 
 codexU is a macOS menu bar and desktop app for tracking OpenAI Codex / ChatGPT Codex and Claude Code quota, token usage, today's tasks, and local AI leadership. It keeps the information you check most in the menu bar and main window, so you can quickly see remaining quota, reset times, daily progress, and how much AI labor one person is directing.
 
 ## Windows Release
 
-The current Windows x86_64 desktop version is available in the [GitHub v1.3.1 Release](https://github.com/shanggqm/codexU/releases/tag/v1.3.1) as an independent Tauri Dashboard in both MSI and NSIS formats:
+The current Windows x86_64 desktop version is available in the [GitHub Windows v1.3.4 Release](https://github.com/shanggqm/codexU/releases/tag/windows-v1.3.4) as an independent Tauri Dashboard in both MSI and NSIS formats:
 
-- `codexU-1.3.1-windows-x86_64.msi`: Windows Installer package.
-- `codexU-1.3.1-windows-x86_64-setup.exe`: NSIS setup wizard.
+- `codexU-1.3.4-windows-x86_64.msi`: Windows Installer package.
+- `codexU-1.3.4-windows-x86_64-setup.exe`: NSIS setup wizard.
 - Windows 10/11 x86_64 is supported; Windows ARM64 is not packaged yet.
 - Verification note: this Windows V0 native visual matrix and shell-lifecycle evidence was collected on a host classified as Windows 11 by build `26200`; Windows 10 remains a supported target but was not observed in this run.
 - The Windows version reads local data under `%USERPROFILE%\.codex\` and preserves the local-first privacy boundary. It does not upload usage, threads, paths, logs, or account data.
 - The Windows version currently supports Codex only; Claude Code is not supported yet.
+
+Windows v1.3.4 fixes plugin marketplace downloads and disk growth during quota refresh, oversized history records, Dashboard edge cases, and the application version shown in Settings. macOS remains at v1.3.2; this Windows release does not rebuild macOS installers.
 
 The Windows version is an independent Tauri desktop implementation. The public Windows installers are not code-signed by the repository's default workflow, so Windows may show a security prompt on first launch. Windows and macOS continue to evolve as separate implementations, so their feature coverage is not yet identical.
 
@@ -73,6 +75,8 @@ The Windows version is an independent Tauri desktop implementation. The public W
 
 ## Value progress
 
+macOS reads model prices from a packaged local JSON catalog, including GPT-6 cache-read, cache-write and service-tier rates. Missing prices are explicitly marked as reference estimates. See [the model pricing catalog](docs/MODEL_PRICING.md) for sources and cache invalidation rules. Other platforms can reuse the catalog and calculation vectors; the app does not fetch prices at runtime.
+
 Value progress estimates the current month's API-equivalent value from locally parsed Codex usage. Each request is priced with its recorded model and service tier, splitting input into ordinary uncached input, cache writes, and cached input before adding output-token cost. Recorded `priority` or `fast` requests use the published Fast mode API rates. Models with long-context pricing use the published long-context rates when one request exceeds 272K input tokens. Reasoning effort is not multiplied separately because reasoning tokens are already included in output usage. Prices come from OpenAI's live [API pricing page](https://developers.openai.com/api/docs/pricing) and the corresponding model pages.
 
 GPT-5.3-Codex-Spark remains a research preview without a final published rate. Spark and unknown models therefore use the GPT-5.5 reference rate and display an `≈` marker instead of being presented as officially priced. The progress endpoint remains a stable reference scale: `200M tokens/day × 30 days`, using a 30% ordinary input / 50% cached input / 20% output mix at about `$7.75 / 1M tokens`, or roughly `$46,500`. The bar is nonlinear after Pro 200, so its width is useful for scanning progress but is not a linear dollar ratio. API-equivalent value is an estimate, not an invoice or rebate.
@@ -118,7 +122,7 @@ After installation, codexU checks GitHub Releases for new versions at most once 
 
 ### Windows
 
-Download a Windows x86_64 installer from the [latest GitHub Release](https://github.com/shanggqm/codexU/releases/latest):
+Download a Windows x86_64 installer from the [Windows Release](https://github.com/shanggqm/codexU/releases/tag/windows-v1.3.4):
 
 - MSI: `codexU-<version>-windows-x86_64.msi`
 - NSIS: `codexU-<version>-windows-x86_64-setup.exe`
@@ -181,16 +185,17 @@ make release-all
 Release artifacts are written to `dist/`, for example:
 
 ```text
-dist/codexU-1.3.1-mac-arm64.dmg
-dist/codexU-1.3.1-mac-arm64.dmg.sha256
-dist/codexU-1.3.1-mac-x86_64.dmg
-dist/codexU-1.3.1-mac-x86_64.dmg.sha256
+dist/codexU-1.3.2-mac-arm64.dmg
+dist/codexU-1.3.2-mac-arm64.dmg.sha256
+dist/codexU-1.3.2-mac-x86_64.dmg
+dist/codexU-1.3.2-mac-x86_64.dmg.sha256
 ```
 
 For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md).
 
 ## Data Sources
 
+- Executable discovery: resolve ChatGPT/Codex by bundle identity, supporting the nested `codex-cli/CodexCLI.app`, `codex-cli/bin/codex`, legacy app layouts, and standard CLI locations. macOS preserves their existing selection order and checks `~/.local/bin/codex` only when all of them are unavailable.
 - Account and quota: `codex app-server` JSON-RPC methods `account/read`, `account/rateLimits/read`, and `account/usage/read`.
 - Local token totals: `~/.codex/state_5.sqlite`.
 - Detailed token splits: `token_count` events in `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/*.jsonl`.
@@ -240,3 +245,7 @@ Scan the QR code to follow my WeChat official account for AI tools, Codex usage 
 Scan to join the Chinese-language codexU user community for usage tips, issue feedback, and open-source collaboration.
 
 <img src="docs/codexu-community-qr.jpg" alt="codexU user community WeChat QR code" width="320" />
+
+### Startup data freshness
+
+Home restores a bounded local summary for the same day, time zone and source, while quota and tasks refresh independently. “Previous result” identifies cached values; full historical details remain in the background. History now uses a local SQLite incremental index: the initial backfill runs in the background, subsequent runs resume from checkpoints, and revisable daily archives are persisted. Incomplete inventories, unreadable files, and unsupported record limits retain prior results with an explicit preparation state instead of fabricated zeros. Expired, unpublished report output is reclaimed in bounded batches while published and pinned cuts remain intact. Cache pressure, index contention, and read failures are shown explicitly. Native five-second startup acceptance still requires an unlocked desktop and measured rendering/interaction; model timings are not a substitute.

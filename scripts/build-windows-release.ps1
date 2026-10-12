@@ -64,11 +64,8 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     throw "npm is required to build the Windows release."
 }
 
-$Toolchain = "1.97.1-x86_64-pc-windows-msvc"
-$InstalledToolchains = (& rustup toolchain list | Out-String)
-if ($InstalledToolchains -notmatch [regex]::Escape($Toolchain)) {
-    Invoke-Checked "rustup" @("toolchain", "install", $Toolchain, "--profile", "minimal", "--component", "rustfmt")
-}
+$Toolchain = "stable-x86_64-pc-windows-msvc"
+Invoke-Checked "rustup" @("update", "--no-self-update", $Toolchain)
 
 Push-Location $WindowsRoot
 try {
@@ -138,7 +135,7 @@ finally {
     }
 }
 
-$BundleRoots = @(
+[string[]]$BundleRoots = @(
     (Join-Path $WindowsRoot "target\release\bundle"),
     (Join-Path $AppRoot "target\release\bundle")
 ) | Where-Object { Test-Path -LiteralPath $_ }
@@ -179,10 +176,16 @@ foreach ($Artifact in $Artifacts) {
     Write-Host "Wrote $ChecksumPath"
 }
 
+$Program = Join-Path (Split-Path -Parent $BundleRoots[0]) 'codexu-tauri.exe'
+if (-not (Test-Path -LiteralPath $Program)) { throw 'Built application is missing.' }
+$SourceSha = (& git -C $RepoRoot rev-parse HEAD | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify packaged source.' }
 $Manifest = [ordered]@{
     product = "codexU"
     version = $Version
     target = "windows-x86_64"
+    source_sha = $SourceSha
+    program_sha256 = (Get-FileHash -LiteralPath $Program -Algorithm SHA256).Hash.ToLowerInvariant()
     installers = @($Artifacts.Name)
     generated_utc = [DateTime]::UtcNow.ToString("o")
 }

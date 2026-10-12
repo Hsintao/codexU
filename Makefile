@@ -35,7 +35,7 @@ endif
 
 POWERSHELL ?= powershell.exe
 
-.PHONY: build run probe test-rate-limits test-statistics-time-zone test-token-counter test-model-pricing test-model-usage-trend test-model-inference-performance test-app-server-pipe test-codex-executable test-task-runtime test-leadership-model test-leadership-assets test-claude-skill-paths test-codex-session-link test-performance-monitor test-phase-one-gate test-particle-animation test-palettes test-macos-compatibility memory-risk-check phase-one-check phase-one-soak install dmg dmg-arm64 dmg-intel checksum checksum-arm64 checksum-intel release release-arm64 release-intel release-all release-package release-windows release-cross-platform-check release-check notarize verify clean clean-dist
+.PHONY: build run probe test-rate-limits test-statistics-time-zone test-token-counter test-model-pricing test-model-usage-trend test-model-inference-performance test-app-server-pipe test-task-runtime test-leadership-model test-leadership-assets test-claude-skill-paths test-codex-session-link test-performance-monitor test-phase-one-gate test-particle-animation test-palettes test-macos-compatibility memory-risk-check phase-one-check phase-one-soak install dmg dmg-arm64 dmg-intel checksum checksum-arm64 checksum-intel release release-arm64 release-intel release-all release-package release-windows release-cross-platform-check release-check notarize verify clean clean-dist
 
 build: test-leadership-assets
 	rm -rf "$(APP_DIR)"
@@ -43,6 +43,7 @@ build: test-leadership-assets
 	cp Resources/Info.plist "$(APP_DIR)/Contents/Info.plist"
 	cp "$(APP_ICON)" "$(RESOURCES_DIR)/"
 	cp Resources/*.png "$(RESOURCES_DIR)/"
+	cp Resources/model-pricing*.json "$(RESOURCES_DIR)/"
 	cp -R Resources/LeadershipBadges "$(RESOURCES_DIR)/LeadershipBadges"
 	cp -R Resources/Palettes "$(RESOURCES_DIR)/Palettes"
 	/usr/bin/xattr -dr com.apple.quarantine "$(APP_DIR)" 2>/dev/null || true
@@ -50,7 +51,7 @@ build: test-leadership-assets
 		-o "$(MACOS_DIR)/$(APP_NAME)" \
 		-framework Cocoa \
 		-framework Carbon \
-		-framework SwiftUI
+		-framework SwiftUI -lsqlite3
 	codesign $(CODESIGN_FLAGS) "$(APP_DIR)"
 	codesign --verify --deep --strict "$(APP_DIR)"
 
@@ -59,6 +60,13 @@ run: build
 
 probe: build
 	"$(MACOS_DIR)/$(APP_NAME)" --dump-json
+
+.PHONY: test-home-startup
+test-home-startup: build
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-startup
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-snapshot
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-runtime-fast-sources
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-task-reader
 
 test-rate-limits:
 	./scripts/test-rate-limits.sh
@@ -80,9 +88,6 @@ test-model-inference-performance: build
 
 test-app-server-pipe: build
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-app-server-pipe
-
-test-codex-executable: build
-	"$(MACOS_DIR)/$(APP_NAME)" --self-test-codex-executable
 
 test-task-runtime: build
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-task-runtime
@@ -181,6 +186,10 @@ release-package: memory-risk-check
 release-windows:
 	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1 -Version "$(VERSION)"
 
+.PHONY: release-windows-check
+release-windows-check: memory-risk-check
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows-release.ps1 -Version "$(VERSION)"
+
 release-cross-platform-check:
 	./scripts/check-cross-platform-release-assets.sh "$(VERSION)" "$(DIST_DIR)"
 
@@ -203,3 +212,7 @@ clean:
 
 clean-dist:
 	rm -rf "$(DIST_DIR)"
+
+.PHONY: test-history-index
+test-history-index:
+	./scripts/test-history-index.sh

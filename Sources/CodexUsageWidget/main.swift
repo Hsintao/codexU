@@ -464,40 +464,6 @@ struct DiagnosticItem: Identifiable {
     let tint: Color
 }
 
-private struct ModelTokenPrice {
-    let model: String
-    let inputPerMillion: Double
-    let cachedInputPerMillion: Double
-    let cacheWriteInputPerMillion: Double
-    let outputPerMillion: Double
-    let fastModeMultiplier: Double?
-    let longContextInputMultiplier: Double?
-    let longContextOutputMultiplier: Double?
-    let usesReferencePricing: Bool
-
-    init(
-        model: String,
-        inputPerMillion: Double,
-        cachedInputPerMillion: Double,
-        outputPerMillion: Double,
-        cacheWriteInputPerMillion: Double? = nil,
-        fastModeMultiplier: Double? = nil,
-        longContextInputMultiplier: Double? = nil,
-        longContextOutputMultiplier: Double? = nil,
-        usesReferencePricing: Bool
-    ) {
-        self.model = model
-        self.inputPerMillion = inputPerMillion
-        self.cachedInputPerMillion = cachedInputPerMillion
-        self.cacheWriteInputPerMillion = cacheWriteInputPerMillion ?? inputPerMillion
-        self.outputPerMillion = outputPerMillion
-        self.fastModeMultiplier = fastModeMultiplier
-        self.longContextInputMultiplier = longContextInputMultiplier
-        self.longContextOutputMultiplier = longContextOutputMultiplier
-        self.usesReferencePricing = usesReferencePricing
-    }
-}
-
 private struct SessionUsageSource {
     let threadId: String
     let rolloutPath: String
@@ -506,7 +472,7 @@ private struct SessionUsageSource {
     let updatedAt: Date?
 }
 
-private struct SessionUsageDelta: Codable {
+struct SessionUsageDelta: Codable {
     let date: Date
     let tokens: TokenBreakdown
     let model: String?
@@ -514,7 +480,7 @@ private struct SessionUsageDelta: Codable {
     let eventIdentity: CodexTokenEventIdentity
 }
 
-private struct SkillLoadEvent: Codable {
+struct SkillLoadEvent: Codable {
     let path: String
     let date: Date?
 }
@@ -579,15 +545,15 @@ private struct DetailedUsageAccumulator {
         monthStart: Date
     ) {
         let cost = estimatedCostUSD(tokens: tokens, price: price, serviceTier: serviceTier)
-        lifetime.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+        lifetime.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         if date >= monthStart {
-            month.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+            month.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         }
         if date >= sevenDayStart {
-            sevenDay.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+            sevenDay.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         }
         if date >= dayStart {
-            today.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+            today.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         }
     }
 
@@ -721,17 +687,13 @@ enum VisualEnergyMode: Equatable {
 }
 
 final class UsageStore: ObservableObject {
-    private struct StatisticsSnapshotCacheEntry {
-        let snapshot: MultiRuntimeUsageSnapshot
-        let cachedAt: Date
-    }
-
     @Published var snapshot: UsageSnapshot = .empty
     @Published var multiRuntimeSnapshot: MultiRuntimeUsageSnapshot = .empty
     @Published var runtimeSnapshots: [RuntimeUsageSnapshot] = []
     @Published var selectedRuntimeScope: RuntimeScope = .codex
     @Published var visibleRuntimeScopes: [RuntimeScope] = RuntimeScope.allCases
     @Published var isRefreshing = false
+    @Published private(set) var homeStatuses: [HomeDataKey: HomeLoadStatus] = [:]
     @Published private(set) var statisticsPreference = StatisticsTimeZonePreferenceStore.load()
     @Published private(set) var statisticsTransitionMessage: String?
     @Published private(set) var isSwitchingStatisticsTimeZone = false
@@ -746,26 +708,33 @@ final class UsageStore: ObservableObject {
     private var systemTimeZoneObserver: NSObjectProtocol?
     private var powerStateObserver: NSObjectProtocol?
     private var thermalStateObserver: NSObjectProtocol?
-    private var isRefreshingTaskBoard = false
-    private var refreshGeneration: UInt64 = 0
-    private var hasPendingRefresh = false
-    private var statisticsSnapshotCache: [String: StatisticsSnapshotCacheEntry] = [:]
-    private var statisticsSnapshotCacheOrder: [String] = []
     private var statisticsFeedbackTimer: Timer?
     private var hasStarted = false
     private var isMainWindowActive = false
     private var isTaskBoardSelected = false
     private var lastFullRefreshCompletedAt: Date?
     private var baseTaskBoards: [RuntimeScope: TaskBoard] = [:]
-    private let statisticsSnapshotCacheLimit = 4
-    private let statisticsSnapshotCacheTTL: TimeInterval = 3 * 60
     private let taskBoardRefreshInterval: TimeInterval = 60
     private let foregroundFullRefreshInterval: TimeInterval = 5 * 60
     private let backgroundFullRefreshInterval: TimeInterval = 15 * 60
     private let codexTaskClient: CodexTaskEventClient
+    private let homeCoordinator: UsageRefreshCoordinator
 
-    init(codexTaskClient: CodexTaskEventClient = CodexAppServerTaskClient()) {
+    init(codexTaskClient: CodexTaskEventClient = CodexAppServerTaskClient(),
+         homeCoordinator: UsageRefreshCoordinator = UsageRefreshCoordinator()) {
         self.codexTaskClient = codexTaskClient
+        self.homeCoordinator = homeCoordinator
+        self.homeCoordinator.onChange = { [weak self] presentation in
+            guard let self else { return }
+            self.homeStatuses = presentation.statuses
+            self.isRefreshing = presentation.isRefreshing
+            self.apply(presentation.snapshot)
+            if self.isSwitchingStatisticsTimeZone,
+               !presentation.sectionStatus(scope: self.selectedRuntimeScope, kind: .local).isWaiting {
+                self.isSwitchingStatisticsTimeZone = false
+                self.statisticsTransitionMessage = nil
+            }
+        }
         self.codexTaskClient.onSnapshot = { [weak self] snapshot in
             self?.applyCodexLiveTasks(snapshot)
         }
@@ -788,9 +757,11 @@ final class UsageStore: ObservableObject {
     }
 
     func start() {
+        guard !hasStarted else { return }
         hasStarted = true
+        homeCoordinator.start(context: RuntimeLoadContext.live(statisticsPreference: statisticsPreference))
+        lastFullRefreshCompletedAt = Date()
         codexTaskClient.start(reason: .startup)
-        refresh()
         systemTimeZoneObserver = NotificationCenter.default.addObserver(
             forName: .NSSystemTimeZoneDidChange,
             object: nil,
@@ -829,6 +800,7 @@ final class UsageStore: ObservableObject {
 
     func stop() {
         hasStarted = false
+        homeCoordinator.stop()
         fullTimer?.invalidate()
         taskBoardTimer?.invalidate()
         statisticsRolloverTimer?.invalidate()
@@ -852,117 +824,45 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh(queueIfBusy: Bool = false) {
-        guard !isRefreshing, !isRefreshingTaskBoard else {
-            if queueIfBusy || isRefreshingTaskBoard {
-                hasPendingRefresh = true
-            }
-            return
-        }
-        refreshGeneration &+= 1
-        let generation = refreshGeneration
-        let preference = statisticsPreference
-        isRefreshing = true
-        let performanceSpan = PerformanceMonitor.shared.begin(.fullRefresh)
-
-        DispatchQueue.global(qos: .utility).async {
-            let multiSnapshot = MultiRuntimeUsageReader().load(
-                statisticsPreference: preference,
-                generation: generation
-            )
-            DispatchQueue.main.async {
-                if generation == self.refreshGeneration,
-                   multiSnapshot.statisticsIdentity.preference == self.statisticsPreference {
-                    self.apply(multiSnapshot)
-                    self.cacheStatisticsSnapshot(multiSnapshot)
-                    if self.isSwitchingStatisticsTimeZone {
-                        self.finishStatisticsTimeZoneSwitch()
-                    }
-                }
-                self.isRefreshing = false
-                PerformanceMonitor.shared.end(performanceSpan)
-                self.lastFullRefreshCompletedAt = Date()
-                self.scheduleFullRefreshTimer()
-                if self.hasPendingRefresh {
-                    self.hasPendingRefresh = false
-                    self.refresh()
-                }
-            }
-        }
+        guard hasStarted else { return }
+        homeCoordinator.refresh(context: RuntimeLoadContext.live(statisticsPreference: statisticsPreference))
+        lastFullRefreshCompletedAt = Date()
+        scheduleFullRefreshTimer()
     }
 
     func updateStatisticsTimeZone(_ preference: StatisticsTimeZonePreference) {
         let repaired = preference.repaired()
         guard repaired != statisticsPreference else { return }
-        refreshGeneration &+= 1
         statisticsPreference = repaired
         StatisticsTimeZonePreferenceStore.save(repaired)
         scheduleStatisticsRollover()
         isSwitchingStatisticsTimeZone = true
         statisticsTransitionMessage = statisticsSwitchingMessage(for: repaired)
-
-        let key = statisticsCacheKey(for: repaired)
-        if let cached = validCachedStatisticsSnapshot(forKey: key) {
-            let identity = StatisticsIdentity(
-                preference: repaired,
-                resolvedIdentifier: StatisticsContext(preference: repaired, now: Date()).resolvedIdentifier,
-                generation: refreshGeneration,
-                now: Date()
-            )
-            let rebound = MultiRuntimeUsageSnapshot(
-                refreshedAt: cached.refreshedAt,
-                runtimes: cached.runtimes,
-                aggregate: cached.aggregate,
-                leadership: cached.leadership,
-                statisticsIdentity: identity
-            )
-            apply(rebound)
-            cacheStatisticsSnapshot(rebound)
-            finishStatisticsTimeZoneSwitch(cached: true)
-            return
-        }
+        baseTaskBoards.removeAll()
         refresh(queueIfBusy: true)
     }
 
-    private func statisticsCacheKey(for preference: StatisticsTimeZonePreference) -> String {
-        StatisticsContext(preference: preference, now: Date()).resolvedIdentifier
+    func homeStatus(scope: RuntimeScope? = nil, kind: HomeDataKind) -> HomeLoadStatus {
+        let effectiveScope = kind == .leadership ? nil : (scope ?? selectedRuntimeScope)
+        return homeStatuses[HomeDataKey(scope: effectiveScope, kind: kind)] ?? HomeLoadStatus()
     }
 
-    private func validCachedStatisticsSnapshot(forKey key: String) -> MultiRuntimeUsageSnapshot? {
-        guard let entry = statisticsSnapshotCache[key],
-              Date().timeIntervalSince(entry.cachedAt) <= statisticsSnapshotCacheTTL else {
-            statisticsSnapshotCache.removeValue(forKey: key)
-            statisticsSnapshotCacheOrder.removeAll { $0 == key }
-            return nil
-        }
-        statisticsSnapshotCacheOrder.removeAll { $0 == key }
-        statisticsSnapshotCacheOrder.append(key)
-        return entry.snapshot
+    func homeStatusText(kind: HomeDataKind, language: WidgetLanguage) -> String {
+        let status = homeStatus(kind: kind)
+        let label = status.label(language, kind: kind)
+        guard let date = status.observedAt else { return label }
+        return "\(label) · \(timeOnly(date, language: language))"
     }
 
-    private func cacheStatisticsSnapshot(_ snapshot: MultiRuntimeUsageSnapshot) {
-        let key = snapshot.statisticsIdentity.resolvedIdentifier
-        statisticsSnapshotCache[key] = StatisticsSnapshotCacheEntry(snapshot: snapshot, cachedAt: Date())
-        statisticsSnapshotCacheOrder.removeAll { $0 == key }
-        statisticsSnapshotCacheOrder.append(key)
-        while statisticsSnapshotCacheOrder.count > statisticsSnapshotCacheLimit {
-            let evicted = statisticsSnapshotCacheOrder.removeFirst()
-            statisticsSnapshotCache.removeValue(forKey: evicted)
-        }
+    func homeUpdateSummary(language: WidgetLanguage) -> String {
+        let quota = homeStatusText(kind: .quota, language: language)
+        let local = homeStatusText(kind: .local, language: language)
+        return language.text("额度：\(quota) · 统计：\(local)", "Quota: \(quota) · Usage: \(local)")
     }
 
     private func statisticsSwitchingMessage(for preference: StatisticsTimeZonePreference) -> String {
         let identifier = StatisticsContext(preference: preference, now: Date()).resolvedIdentifier
         return "正在切换到 \(identifier)…"
-    }
-
-    private func finishStatisticsTimeZoneSwitch(cached: Bool = false) {
-        isSwitchingStatisticsTimeZone = false
-        let identifier = multiRuntimeSnapshot.statisticsIdentity.resolvedIdentifier
-        statisticsTransitionMessage = cached ? "已切换到 \(identifier) · 缓存" : "已切换到 \(identifier)"
-        statisticsFeedbackTimer?.invalidate()
-        statisticsFeedbackTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
-            self?.statisticsTransitionMessage = nil
-        }
     }
 
     private func scheduleStatisticsRollover() {
@@ -1144,54 +1044,34 @@ final class UsageStore: ObservableObject {
     }
 
     private func refreshTaskBoard() {
-        guard !isRefreshing, !isRefreshingTaskBoard else { return }
-        isRefreshingTaskBoard = true
-        let performanceSpan = PerformanceMonitor.shared.begin(.taskRefresh)
-        let scope = selectedRuntimeScope
-        let preference = statisticsPreference
-        if scope == .codex {
-            codexTaskClient.refreshThreads()
-        }
-
-        DispatchQueue.global(qos: .utility).async {
-            let taskBoard = MultiRuntimeUsageReader().loadTaskBoard(
-                scope: scope,
-                statisticsPreference: preference
-            )
-            DispatchQueue.main.async {
-                self.applyTaskBoard(taskBoard, for: scope)
-                self.isRefreshingTaskBoard = false
-                PerformanceMonitor.shared.end(performanceSpan, success: taskBoard != nil)
-                if self.hasPendingRefresh {
-                    self.hasPendingRefresh = false
-                    self.refresh()
-                }
-            }
-        }
+        guard hasStarted else { return }
+        if selectedRuntimeScope == .codex { codexTaskClient.refreshThreads() }
+        homeCoordinator.refreshTasks(scope: selectedRuntimeScope)
     }
 
     private func apply(_ multiSnapshot: MultiRuntimeUsageSnapshot) {
         let performanceSpan = PerformanceMonitor.shared.begin(.statePublish)
         defer { PerformanceMonitor.shared.end(performanceSpan) }
-        let reconciledRuntimes = RuntimeQuotaContinuity.reconcile(
-            previous: runtimeSnapshots,
-            incoming: multiSnapshot.runtimes
-        )
+        // Each source was already reconciled by the coordinator. A failed
+        // account read must not reuse windows from an unverified identity.
+        let reconciledRuntimes = multiSnapshot.runtimes
+        // The coordinator preserves valid boards on a source failure and clears
+        // them when the day/timezone changes. Mirror both decisions here.
+        baseTaskBoards.removeAll(keepingCapacity: true)
         for runtime in reconciledRuntimes {
             if let board = runtime.snapshot.taskBoard {
                 baseTaskBoards[runtime.scope] = board
             }
         }
         let displayedRuntimes = reconciledRuntimes.map { runtime -> RuntimeUsageSnapshot in
-            guard runtime.scope == .codex,
-                  let board = baseTaskBoards[.codex]
-            else { return runtime }
-            return runtime.replacingTaskBoard(board.merging(codexLiveTasks))
+            guard runtime.scope == .codex, codexLiveTasks.records.values.contains(where: \.isRealtime) else { return runtime }
+            let board = baseTaskBoards[.codex] ?? TaskBoard(refreshedAt: codexLiveTasks.refreshedAt, columns: [])
+            return runtime.replacingTaskBoard(board.mergingHomeTasks(codexLiveTasks))
         }
         let reconciledSnapshot = MultiRuntimeUsageSnapshot(
             refreshedAt: multiSnapshot.refreshedAt,
             runtimes: displayedRuntimes,
-            aggregate: AgentUsageAggregator().aggregate(displayedRuntimes, at: multiSnapshot.refreshedAt),
+            aggregate: multiSnapshot.aggregate,
             leadership: multiSnapshot.leadership,
             statisticsIdentity: multiSnapshot.statisticsIdentity
         )
@@ -1210,15 +1090,16 @@ final class UsageStore: ObservableObject {
             baseTaskBoards[scope] = taskBoard
         }
         let displayedBoard = scope == .codex
-            ? taskBoard?.merging(codexLiveTasks)
+            ? taskBoard?.mergingHomeTasks(codexLiveTasks)
             : taskBoard
         publishTaskBoard(displayedBoard, for: scope)
     }
 
     private func applyCodexLiveTasks(_ liveTasks: CodexTaskLiveSnapshot) {
         codexLiveTasks = liveTasks
-        guard let baseBoard = baseTaskBoards[.codex] else { return }
-        publishTaskBoard(baseBoard.merging(liveTasks), for: .codex)
+        guard baseTaskBoards[.codex] != nil || liveTasks.records.values.contains(where: \.isRealtime) else { return }
+        let baseBoard = baseTaskBoards[.codex] ?? TaskBoard(refreshedAt: liveTasks.refreshedAt, columns: [])
+        publishTaskBoard(baseBoard.mergingHomeTasks(liveTasks), for: .codex)
     }
 
     private func publishTaskBoard(_ taskBoard: TaskBoard?, for scope: RuntimeScope) {
@@ -1230,7 +1111,7 @@ final class UsageStore: ObservableObject {
 
         guard runtimeSnapshots[index].snapshot.taskBoard?.columns != taskBoard?.columns else { return }
         runtimeSnapshots[index] = runtimeSnapshots[index].replacingTaskBoard(taskBoard)
-        let aggregate = AgentUsageAggregator().aggregate(runtimeSnapshots, at: multiRuntimeSnapshot.refreshedAt)
+        let aggregate = multiRuntimeSnapshot.aggregate
         multiRuntimeSnapshot = MultiRuntimeUsageSnapshot(
             refreshedAt: multiRuntimeSnapshot.refreshedAt,
             runtimes: runtimeSnapshots,
@@ -1244,120 +1125,10 @@ final class UsageStore: ObservableObject {
     }
 }
 
-enum CodexExecutableResolver {
-    static func candidatePaths(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
-        installedAppURL: URL? = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")
-    ) -> [String] {
-        var paths = [
-            homeDirectory.appendingPathComponent(".local/bin/codex").path,
-            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex"
-        ]
-
-        // Preserve support for Codex/ChatGPT apps installed outside /Applications.
-        if let installedAppURL {
-            paths.append(installedAppURL.appendingPathComponent("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex").path)
-            paths.append(installedAppURL.appendingPathComponent("Contents/Resources/codex").path)
-        }
-        paths.append("/usr/bin/codex")
-
-        var seen = Set<String>()
-        return paths.filter { seen.insert($0).inserted }
-    }
-
-    static func resolve(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
-        installedAppURL: URL? = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex"),
-        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
-    ) -> String? {
-        candidatePaths(homeDirectory: homeDirectory, installedAppURL: installedAppURL).first(where: isExecutable)
-    }
-}
-
-enum CodexExecutableResolverSelfTest {
-    static func run() -> Bool {
-        let home = URL(fileURLWithPath: "/Users/codexu-test")
-        let candidates = CodexExecutableResolver.candidatePaths(
-            homeDirectory: home,
-            installedAppURL: URL(fileURLWithPath: "/Applications/ChatGPT.app")
-        )
-        let expectedPriority = [
-            "/Users/codexu-test/.local/bin/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex"
-        ]
-        guard Array(candidates.prefix(expectedPriority.count)) == expectedPriority else {
-            print("Codex executable self-test failed: candidate priority or legacy paths changed")
-            return false
-        }
-
-        let legacyPaths = [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex",
-            "/usr/bin/codex"
-        ]
-        for legacyPath in legacyPaths {
-            guard CodexExecutableResolver.resolve(
-                homeDirectory: home,
-                installedAppURL: nil,
-                isExecutable: { $0 == legacyPath }
-            ) == legacyPath else {
-                print("Codex executable self-test failed: legacy fallback was not resolved: \(legacyPath)")
-                return false
-            }
-        }
-
-        let customApp = URL(fileURLWithPath: "/Applications/Custom Codex.app")
-        let customBundlePath = customApp.appendingPathComponent("Contents/Resources/codex").path
-        guard CodexExecutableResolver.resolve(
-            homeDirectory: home,
-            installedAppURL: customApp,
-            isExecutable: { $0 == customBundlePath }
-        ) == customBundlePath else {
-            print("Codex executable self-test failed: discovered app bundle fallback was not resolved")
-            return false
-        }
-
-        guard let actualPath = CodexExecutableResolver.resolve() else {
-            print("Codex executable self-test failed: no executable Codex candidate found")
-            return false
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: actualPath)
-        process.arguments = ["--version"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            print("Codex executable self-test failed: could not run --version at \(actualPath)")
-            return false
-        }
-        let version = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard process.terminationStatus == 0, version.hasPrefix("codex-cli ") else {
-            print("Codex executable self-test failed: --version returned status \(process.terminationStatus)")
-            return false
-        }
-
-        print("Codex executable self-test passed: \(actualPath) (\(version))")
-        return true
-    }
-}
-
 final class CodexUsageReader {
     private let fileManager = FileManager.default
+    private var sqliteReadFailed = false
+    private let codexExecutablePath: String?
     private let localAnalyticsCacheVersion = 15
     private let sessionUsageCacheVersion = 10
     private let inferenceSampleSchemaVersion = 2
@@ -1371,6 +1142,10 @@ final class CodexUsageReader {
     private static var persistentSessionUsageCacheIsDirty = false
     private static var lastPersistentSessionUsageCacheWriteAt: Date?
     private static var localAnalyticsCache: LocalAnalyticsCacheEntry?
+
+    init(codexExecutablePath: String? = nil) {
+        self.codexExecutablePath = codexExecutablePath
+    }
 
     func load(context: RuntimeLoadContext) -> UsageSnapshot {
         var messages: [String] = []
@@ -1395,6 +1170,46 @@ final class CodexUsageReader {
         )
     }
 
+    func loadQuota(context: RuntimeLoadContext) -> UsageSnapshot {
+        var messages: [String] = []
+        let appServer = readAppServer(messages: &messages, quotaOnly: true)
+        return UsageSnapshot(
+            refreshedAt: context.now,
+            account: appServer.account,
+            limitId: appServer.limitId,
+            limitName: appServer.limitName,
+            quotaReadSucceeded: appServer.quotaReadSucceeded,
+            fiveHourQuota: appServer.fiveHourQuota,
+            sevenDayQuota: appServer.sevenDayQuota,
+            monthlyQuota: appServer.monthlyQuota,
+            credits: appServer.credits,
+            cloudLifetimeTokens: nil,
+            local: nil,
+            taskBoard: nil,
+            messages: messages
+        )
+    }
+
+    func loadLocal(context: RuntimeLoadContext) -> UsageSnapshot {
+        var messages: [String] = []
+        let local = readLocalUsage(context: context, messages: &messages)
+        return UsageSnapshot(
+            refreshedAt: context.now,
+            account: nil,
+            limitId: nil,
+            limitName: nil,
+            quotaReadSucceeded: false,
+            fiveHourQuota: nil,
+            sevenDayQuota: nil,
+            monthlyQuota: nil,
+            credits: nil,
+            cloudLifetimeTokens: nil,
+            local: local,
+            taskBoard: nil,
+            messages: messages
+        )
+    }
+
     func loadTaskBoard(context: RuntimeLoadContext) -> TaskBoard? {
         var messages: [String] = []
         return readTaskBoard(context: context, messages: &messages)
@@ -1413,10 +1228,14 @@ final class CodexUsageReader {
         var cloudLifetimeTokens: Int64?
     }
 
-    private func readAppServer(messages: inout [String]) -> AppServerSnapshot {
+    private func readAppServer(messages: inout [String], quotaOnly: Bool = false) -> AppServerSnapshot {
+        // Presentation has its own four-second deadline. Keep the request alive
+        // long enough to accept a valid late reply (real quota reads can take >4s).
+        let responseDeadline = DispatchTime.now() + 12
+        let responseIDs = quotaOnly ? [2, 3] : [2, 3, 4]
         let performanceSpan = PerformanceMonitor.shared.begin(.appServerQuota)
         defer { PerformanceMonitor.shared.end(performanceSpan) }
-        guard let codexPath = resolveCodexExecutablePath() else {
+        guard let codexPath = codexExecutablePath ?? resolveCodexExecutablePath() else {
             messages.append("未找到 codex 可执行文件")
             return AppServerSnapshot()
         }
@@ -1455,7 +1274,7 @@ final class CodexUsageReader {
         }
 
         let responseGroup = DispatchGroup()
-        [2, 3, 4].forEach { _ in responseGroup.enter() }
+        responseIDs.forEach { _ in responseGroup.enter() }
 
         let lock = NSLock()
         var buffer = Data()
@@ -1465,6 +1284,7 @@ final class CodexUsageReader {
         var appServerMessages: [String] = []
 
         func markComplete(_ id: Int) {
+            guard responseIDs.contains(id) else { return }
             lock.lock()
             let inserted = completed.insert(id).inserted
             lock.unlock()
@@ -1489,7 +1309,9 @@ final class CodexUsageReader {
                     writeMessage(["method": "initialized"])
                     writeMessage(["id": 2, "method": "account/read", "params": ["refreshToken": false]])
                     writeMessage(["id": 3, "method": "account/rateLimits/read"])
-                    writeMessage(["id": 4, "method": "account/usage/read"])
+                    if !quotaOnly {
+                        writeMessage(["id": 4, "method": "account/usage/read"])
+                    }
                 }
                 return
             }
@@ -1521,7 +1343,7 @@ final class CodexUsageReader {
             }
             lock.unlock()
 
-            if [2, 3, 4].contains(id) {
+            if responseIDs.contains(id) {
                 markComplete(id)
             }
         }
@@ -1562,7 +1384,7 @@ final class CodexUsageReader {
                     lock.lock()
                     appServerMessages.append("app-server 输出超过安全上限")
                     lock.unlock()
-                    [2, 3, 4].forEach(markComplete)
+                    responseIDs.forEach(markComplete)
                     break
                 }
 
@@ -1592,7 +1414,7 @@ final class CodexUsageReader {
             ]
         ])
 
-        if responseGroup.wait(timeout: .now() + 12) == .timedOut {
+        if responseGroup.wait(timeout: responseDeadline) == .timedOut {
             lock.lock()
             appServerMessages.append("app-server 响应超时")
             lock.unlock()
@@ -1610,15 +1432,27 @@ final class CodexUsageReader {
             }
         }
         try? outputHandle.close()
-        _ = readerGroup.wait(timeout: .now() + 1)
+        // The quick path must not spend another second waiting for process cleanup.
+        // The reader owns its duplicate descriptor and exits after termination.
+        if !quotaOnly {
+            _ = readerGroup.wait(timeout: .now() + 1)
+        }
 
         lock.lock()
-        let finalSnapshot = snapshot
+        var finalSnapshot = snapshot
         let finalAppServerMessages = appServerMessages
         lock.unlock()
 
         messages.append(contentsOf: finalAppServerMessages)
         messages.append(contentsOf: finalSnapshot.rateLimitDiagnostics)
+        if quotaOnly, finalSnapshot.quotaReadSucceeded, finalSnapshot.account == nil {
+            finalSnapshot.quotaReadSucceeded = false
+            finalSnapshot.fiveHourQuota = nil
+            finalSnapshot.sevenDayQuota = nil
+            finalSnapshot.monthlyQuota = nil
+            finalSnapshot.credits = nil
+            messages.append("Codex 账户信息尚未确认，额度暂未更新")
+        }
 
         return finalSnapshot
     }
@@ -1782,8 +1616,8 @@ final class CodexUsageReader {
 
     private func readLocalUsage(context: RuntimeLoadContext, messages: inout [String]) -> LocalUsage? {
         guard let dbPath = firstExistingPath([
-            NSHomeDirectory() + "/.codex/state_5.sqlite",
-            NSHomeDirectory() + "/.codex/sqlite/state_5.sqlite"
+            context.homeDirectory.appendingPathComponent(".codex/state_5.sqlite").path,
+            context.homeDirectory.appendingPathComponent(".codex/sqlite/state_5.sqlite").path
         ]) else {
             messages.append("未找到 Codex state_5.sqlite")
             return nil
@@ -2188,7 +2022,7 @@ final class CodexUsageReader {
                 sessionUsage.add(
                     tokens: delta.tokens,
                     costUSD: cost,
-                    usesReferencePricing: price.usesReferencePricing
+                    usesReferencePricing: price.isReference(serviceTier: delta.serviceTier)
                 )
                 accumulator.add(
                     delta.tokens,
@@ -2206,7 +2040,7 @@ final class CodexUsageReader {
                     usage.add(
                         tokens: delta.tokens,
                         costUSD: cost,
-                        usesReferencePricing: price.usesReferencePricing
+                        usesReferencePricing: price.isReference(serviceTier: delta.serviceTier)
                     )
                     dailyUsage[key] = usage
 
@@ -2216,7 +2050,7 @@ final class CodexUsageReader {
                     modelDayUsage.add(
                         tokens: delta.tokens,
                         costUSD: cost,
-                        usesReferencePricing: price.usesReferencePricing
+                        usesReferencePricing: price.isReference(serviceTier: delta.serviceTier)
                     )
                     modelUsage[key] = modelDayUsage
                     dailyUsageByModel[modelID] = modelUsage
@@ -2343,9 +2177,9 @@ final class CodexUsageReader {
         monthStart: Date,
         sourceQuality: UsageSourceQuality,
         modelDailyUsage: [String: [String: PricedTokenUsage]] = [:],
-        modelNamesByID: [String: String] = [:]
+        modelNamesByID: [String: String] = [:],
+        calendar: Calendar = .current
     ) -> UsageTrend {
-        let calendar = Calendar.current
         var buckets: [UsageDayBucket] = []
         var cursor = calendar.startOfDay(for: trendStart)
         let end = calendar.startOfDay(for: dayStart)
@@ -2400,8 +2234,8 @@ final class CodexUsageReader {
             isNewActivity = sevenDay.tokens.visibleTotalTokens > 0
         }
 
-        let dayOfMonth = max(calendar.component(.day, from: Date()), 1)
-        let daysInMonth = calendar.range(of: .day, in: .month, for: Date())?.count ?? dayOfMonth
+        let dayOfMonth = max(calendar.component(.day, from: dayStart), 1)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: dayStart)?.count ?? dayOfMonth
         let projectedMonthCostUSD: Double?
         if dayOfMonth >= 2, month.estimatedCostUSD > 0 {
             projectedMonthCostUSD = month.estimatedCostUSD / Double(dayOfMonth) * Double(daysInMonth)
@@ -2422,7 +2256,8 @@ final class CodexUsageReader {
                 sevenDayStart: sevenDayStart,
                 trendStart: trendStart,
                 monthStart: monthStart,
-                sourceQuality: sourceQuality
+                sourceQuality: sourceQuality,
+                calendar: calendar
             )
             guard modelTrend.activeDayCount > 0 else { return nil }
             return ModelUsageTrend(
@@ -2971,7 +2806,8 @@ final class CodexUsageReader {
             return nil
         }
 
-        var buffer = data
+        let buffer = data
+        var cursor = buffer.startIndex
         var forkedFromId: String?
         var activeModel: String?
         var activeServiceTier: String?
@@ -2984,9 +2820,9 @@ final class CodexUsageReader {
         var toolCalls: [String: Int] = [:]
         var skillLoads: [SkillLoadEvent] = []
 
-        while let newline = buffer.firstIndex(of: 10) {
-            let lineData = buffer.subdata(in: buffer.startIndex..<newline)
-            buffer.removeSubrange(buffer.startIndex...newline)
+        while cursor < buffer.endIndex, let newline = buffer[cursor...].firstIndex(of: 10) {
+            let lineData = buffer.subdata(in: cursor..<newline)
+            cursor = buffer.index(after: newline)
             processSessionLine(
                 lineData,
                 sessionMetaNeedle: sessionMetaNeedle,
@@ -3013,9 +2849,9 @@ final class CodexUsageReader {
             )
         }
 
-        if !buffer.isEmpty {
+        if cursor < buffer.endIndex {
             processSessionLine(
-                buffer,
+                buffer.subdata(in: cursor..<buffer.endIndex),
                 sessionMetaNeedle: sessionMetaNeedle,
                 turnContextNeedle: turnContextNeedle,
                 threadSettingsNeedle: threadSettingsNeedle,
@@ -3043,7 +2879,30 @@ final class CodexUsageReader {
         return (forkedFromId, sawTokenEvent, tokenEventCount, deltas, inferenceSamples, toolCalls, skillLoads)
     }
 
-    private func processSessionLine(
+    // Test oracle: the legacy whole-file filter/parser, without touching persistent caches.
+    func historyIndexOracle(url: URL) -> CodexIndexBatch? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        func needle(_ type: String) -> Data { Data(("\"type\":\"" + type + "\"").utf8) }
+        let pattern = #""type":"(session_meta|turn_context|thread_settings_applied|token_count|function_call|custom_tool_call|function_call_output|custom_tool_call_output|tool_search_call|tool_search_output|web_search_call|mcp_tool_call_end|web_search_end|patch_apply_end|image_generation_end|reasoning|agent_message|agent_reasoning)"|"role":"assistant""#
+        guard let parsed = parseSessionUsageWithGrep(url: url, eventPattern: pattern,
+            sessionMetaNeedle: needle("session_meta"), turnContextNeedle: needle("turn_context"),
+            threadSettingsNeedle: needle("thread_settings_applied"), tokenCountNeedle: needle("token_count"),
+            functionCallNeedle: needle("function_call"), customToolCallNeedle: needle("custom_tool_call"),
+            inferenceBoundaryNeedles: inferenceBoundaryPayloadTypes.map(needle),
+            modelOutputNeedles: modelOutputPayloadTypes.map(needle) + [Data(#""role":"assistant""#.utf8)],
+            fractionalFormatter: fractional, plainFormatter: plain) else { return nil }
+        var checkpoint = CodexIndexCheckpoint()
+        checkpoint.forkedFromID = parsed.forkedFromId
+        checkpoint.sawTokenEvent = parsed.hasTokenEvents
+        checkpoint.tokenEventCount = parsed.tokenEventCount
+        return CodexIndexBatch(checkpoint: checkpoint, deltas: parsed.deltas,
+            inferenceSamples: parsed.inferenceSamples, toolCalls: parsed.toolCalls, skillLoads: parsed.skillLoads,
+            readBytes: 0, reachedTarget: true, awaitingNewline: false)
+    }
+
+    func processSessionLine(
         _ lineData: Data,
         sessionMetaNeedle: Data,
         turnContextNeedle: Data,
@@ -3096,6 +2955,9 @@ final class CodexUsageReader {
 
         if object["type"] as? String == "turn_context" {
             applyTurnContextModel(payload["model"] as? String, to: &activeModel)
+            if let tier = payload["service_tier"] as? String {
+                activeServiceTier = normalizedServiceTier(tier)
+            }
             if let timestamp = object["timestamp"] as? String,
                let date = fractionalFormatter.date(from: timestamp) ?? plainFormatter.date(from: timestamp) {
                 inferenceTracker.applyTurnContext(
@@ -3187,8 +3049,8 @@ final class CodexUsageReader {
         var doneItems: [TaskItem] = []
 
         if let dbPath = firstExistingPath([
-            NSHomeDirectory() + "/.codex/state_5.sqlite",
-            NSHomeDirectory() + "/.codex/sqlite/state_5.sqlite"
+            context.homeDirectory.appendingPathComponent(".codex/state_5.sqlite").path,
+            context.homeDirectory.appendingPathComponent(".codex/sqlite/state_5.sqlite").path
         ]), let sqlitePath = firstExistingPath([
             "/usr/bin/sqlite3",
             "/opt/homebrew/bin/sqlite3",
@@ -3249,8 +3111,9 @@ final class CodexUsageReader {
         activeItems = sortedTaskItems(activeItems)
         pendingItems = sortedTaskItems(pendingItems)
         doneItems = sortedTaskItems(doneItems)
-        let scheduledItems = readAutomationTasks(now: now)
+        let scheduledItems = readAutomationTasks(now: now, homeDirectory: context.homeDirectory)
 
+        guard messages.isEmpty, !sqliteReadFailed else { return nil }
         return TaskBoard(refreshedAt: now, columns: [
             TaskColumn(id: .active, title: "最近活跃", count: activeItems.count, items: activeItems),
             TaskColumn(id: .pending, title: "待继续", count: pendingItems.count, items: pendingItems),
@@ -3289,8 +3152,8 @@ final class CodexUsageReader {
         )
     }
 
-    private func readAutomationTasks(now: Date) -> [TaskItem] {
-        let root = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/automations")
+    private func readAutomationTasks(now: Date, homeDirectory: URL) -> [TaskItem] {
+        let root = homeDirectory.appendingPathComponent(".codex/automations")
         guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: nil) else {
             return []
         }
@@ -3365,6 +3228,7 @@ final class CodexUsageReader {
         do {
             try process.run()
         } catch {
+            sqliteReadFailed = true
             PerformanceMonitor.shared.end(performanceSpan, success: false)
             return []
         }
@@ -3374,15 +3238,22 @@ final class CodexUsageReader {
             process: process,
             maximumBytes: 32 * 1_024 * 1_024
         ) else {
+            sqliteReadFailed = true
             PerformanceMonitor.shared.end(performanceSpan, success: false)
             return []
         }
         process.waitUntilExit()
 
+        // sqlite3 emits no bytes for an empty result set on some versions.
+        if process.terminationStatus == 0 && data.isEmpty {
+            PerformanceMonitor.shared.end(performanceSpan)
+            return []
+        }
         guard
             process.terminationStatus == 0,
             let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else {
+            sqliteReadFailed = true
             PerformanceMonitor.shared.end(performanceSpan, success: false)
             return []
         }
@@ -3428,7 +3299,7 @@ final class CodexUsageReader {
     }
 
     private func resolveCodexExecutablePath() -> String? {
-        CodexExecutableResolver.resolve(isExecutable: { fileManager.isExecutableFile(atPath: $0) })
+        CodexExecutableLocator.resolve()?.path
     }
 
     private func firstExistingPath(_ paths: [String]) -> String? {
@@ -3702,11 +3573,11 @@ private func equivalentCachedSkillPath(for path: String) -> String? {
     return candidates.first?.path
 }
 
-private func skillName(from path: String) -> String {
+func skillName(from path: String) -> String {
     URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
 }
 
-private func skillSourceLabel(from path: String) -> String {
+func skillSourceLabel(from path: String) -> String {
     let displayPath = displayHomePath(path)
     let components = path.split(separator: "/").map(String.init)
 
@@ -3759,135 +3630,7 @@ func estimateStaticTokens(_ text: String) -> Int64 {
 }
 
 private func modelTokenPrice(for model: String?) -> ModelTokenPrice {
-    let normalized = (model ?? "").lowercased()
-
-    if normalized.contains("gpt-5.6-sol") || normalized == "gpt-5.6" {
-        return ModelTokenPrice(
-            model: "gpt-5.6-sol",
-            inputPerMillion: 5,
-            cachedInputPerMillion: 0.5,
-            outputPerMillion: 30,
-            cacheWriteInputPerMillion: 6.25,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.6-terra") {
-        return ModelTokenPrice(
-            model: "gpt-5.6-terra",
-            inputPerMillion: 2,
-            cachedInputPerMillion: 0.2,
-            outputPerMillion: 12,
-            cacheWriteInputPerMillion: 2.5,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.6-luna") {
-        return ModelTokenPrice(
-            model: "gpt-5.6-luna",
-            inputPerMillion: 0.2,
-            cachedInputPerMillion: 0.02,
-            outputPerMillion: 1.2,
-            cacheWriteInputPerMillion: 0.25,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.5-pro") {
-        return ModelTokenPrice(
-            model: "gpt-5.5-pro",
-            inputPerMillion: 30,
-            cachedInputPerMillion: 30,
-            outputPerMillion: 180,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.5") || normalized == "chat-latest" {
-        return ModelTokenPrice(
-            model: "gpt-5.5",
-            inputPerMillion: 5,
-            cachedInputPerMillion: 0.5,
-            outputPerMillion: 30,
-            fastModeMultiplier: 2.5,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.4-mini") {
-        return ModelTokenPrice(
-            model: "gpt-5.4-mini",
-            inputPerMillion: 0.75,
-            cachedInputPerMillion: 0.075,
-            outputPerMillion: 4.5,
-            fastModeMultiplier: 2,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.4-nano") {
-        return ModelTokenPrice(model: "gpt-5.4-nano", inputPerMillion: 0.2, cachedInputPerMillion: 0.02, outputPerMillion: 1.25, usesReferencePricing: false)
-    }
-    if normalized.contains("gpt-5.4-pro") {
-        return ModelTokenPrice(
-            model: "gpt-5.4-pro",
-            inputPerMillion: 30,
-            cachedInputPerMillion: 30,
-            outputPerMillion: 180,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.4") {
-        return ModelTokenPrice(
-            model: "gpt-5.4",
-            inputPerMillion: 2.5,
-            cachedInputPerMillion: 0.25,
-            outputPerMillion: 15,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.3-codex-spark") {
-        return ModelTokenPrice(
-            model: "gpt-5.3-codex-spark",
-            inputPerMillion: 5,
-            cachedInputPerMillion: 0.5,
-            outputPerMillion: 30,
-            usesReferencePricing: true
-        )
-    }
-    if normalized.contains("gpt-5.3-codex") {
-        return ModelTokenPrice(
-            model: "gpt-5.3-codex",
-            inputPerMillion: 1.75,
-            cachedInputPerMillion: 0.175,
-            outputPerMillion: 14,
-            fastModeMultiplier: 2,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.2-codex")
-        || normalized.contains("gpt-5.3-chat")
-        || normalized.contains("gpt-5.2") {
-        return ModelTokenPrice(model: "gpt-5.2-codex", inputPerMillion: 1.75, cachedInputPerMillion: 0.175, outputPerMillion: 14, usesReferencePricing: false)
-    }
-    if normalized.contains("gpt-5-codex") || normalized == "gpt-5" {
-        return ModelTokenPrice(model: "gpt-5", inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10, usesReferencePricing: false)
-    }
-
-    return ModelTokenPrice(model: "gpt-5.5", inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30, usesReferencePricing: true)
+    ModelPricingCatalog.shared.price(for: model)
 }
 
 func modelUsageUsesReferencePricing(_ model: String?) -> Bool {
@@ -3928,37 +3671,13 @@ private func estimatedCostUSD(
     price: ModelTokenPrice,
     serviceTier: String? = nil
 ) -> Double {
-    let usesLongContextPricing = tokens.inputTokens > 272_000
-        && price.longContextInputMultiplier != nil
-        && price.longContextOutputMultiplier != nil
-    let inputMultiplier: Double
-    let outputMultiplier: Double
-    if usesLongContextPricing {
-        // Fast mode does not support long-context requests, so the published
-        // long-context rates are the only applicable API-equivalent basis.
-        inputMultiplier = price.longContextInputMultiplier ?? 1
-        outputMultiplier = price.longContextOutputMultiplier ?? 1
-    } else if isFastServiceTier(serviceTier), let fastModeMultiplier = price.fastModeMultiplier {
-        inputMultiplier = fastModeMultiplier
-        outputMultiplier = fastModeMultiplier
-    } else {
-        inputMultiplier = 1
-        outputMultiplier = 1
-    }
-
-    let uncachedInputCost = Double(tokens.ordinaryUncachedInputTokens) / 1_000_000
-        * price.inputPerMillion * inputMultiplier
-    let cachedInputCost = Double(tokens.billableCachedInputTokens) / 1_000_000
-        * price.cachedInputPerMillion * inputMultiplier
-    let cacheWriteInputCost = Double(tokens.billableCacheWriteInputTokens) / 1_000_000
-        * price.cacheWriteInputPerMillion * inputMultiplier
-    let outputCost = Double(max(tokens.outputTokens, 0)) / 1_000_000
-        * price.outputPerMillion * outputMultiplier
-    return uncachedInputCost + cachedInputCost + cacheWriteInputCost + outputCost
+    price.estimate(input: tokens.inputTokens, cached: tokens.cachedInputTokens,
+                   write: tokens.cacheWriteInputTokens, output: tokens.outputTokens, serviceTier: serviceTier)
 }
 
 private enum ModelPricingSelfTest {
     static func run() -> Bool {
+        guard SharedModelPricingSelfTest.run() else { return false }
         var failures: [String] = []
         func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
             if !condition() { failures.append(message) }
@@ -3987,7 +3706,7 @@ private enum ModelPricingSelfTest {
         expect(!sol.usesReferencePricing, "gpt-5.6 should use an explicit price")
         expect(terra.model == "gpt-5.6-terra", "terra snapshots should preserve the terra price")
         expect(luna.model == "gpt-5.6-luna", "luna matching should be case-insensitive")
-        expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: sol), 0.62), "Sol cached input estimate should use the split rates")
+        expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: sol), 0.456), "Sol cached input estimate should use the split rates")
         expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: terra), 0.248), "Terra should use the official standard API rates")
         expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: luna), 0.0248), "Luna should use the official standard API rates")
         expect(nearlyEqual(gpt55.inputPerMillion, 5) && nearlyEqual(gpt55.cachedInputPerMillion, 0.5) && nearlyEqual(gpt55.outputPerMillion, 30), "GPT-5.5 should use the official standard API rates")
@@ -4004,8 +3723,8 @@ private enum ModelPricingSelfTest {
             reasoningOutputTokens: 0,
             totalTokens: 110_000
         )
-        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol), 0.6325), "GPT-5.6 cache writes should use the 1.25x write rate")
-        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol, serviceTier: "priority"), 1.265), "GPT-5.6 Fast mode should use the published 2x API rates")
+        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol), 0.466), "GPT-5.6 cache writes should use the 1.25x write rate")
+        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol, serviceTier: "priority"), 0.932), "GPT-5.6 Fast mode should use the published 2x API rates")
         expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: gpt55, serviceTier: "fast"), 1.55), "GPT-5.5 Fast mode should use the published 2.5x API rates")
 
         let longContextTokens = TokenBreakdown(
@@ -4016,7 +3735,7 @@ private enum ModelPricingSelfTest {
             reasoningOutputTokens: 0,
             totalTokens: 400_000
         )
-        expect(nearlyEqual(estimatedCostUSD(tokens: longContextTokens, price: sol), 6.85), "GPT-5.6 long context should use 2x input and 1.5x output rates")
+        expect(nearlyEqual(estimatedCostUSD(tokens: longContextTokens, price: sol), 4.88), "GPT-5.6 long context should use 2x input and 1.5x output rates")
         expect(isFastServiceTier("priority") && isFastServiceTier("FAST") && !isFastServiceTier("default"), "service tier normalization should distinguish Fast mode")
         expect(!modelUsageUsesReferencePricing("gpt-5.6-luna"), "known GPT-5.6 models should not use reference pricing")
         expect(modelUsageUsesReferencePricing("gpt-5.3-codex-spark"), "Codex Spark should not inherit GPT-5.3 Codex pricing")
@@ -4525,6 +4244,7 @@ struct UsageWidgetView: View {
     private var themeMode: WidgetThemeMode { settings.themeMode }
     private var selectedQuotaIsStale: Bool {
         store.runtimeSnapshot(for: store.selectedRuntimeScope)?.status == .stale
+            || store.homeStatus(kind: .quota).phase == .cached
     }
     private var effectiveColorScheme: ColorScheme {
         themeMode.preferredColorScheme ?? colorScheme
@@ -4604,9 +4324,6 @@ struct UsageWidgetView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    if shouldShowEnvironmentChecklist {
-                        environmentChecklistSection
-                    }
                     usageOverviewSection
                     dashboardTabsSection
                 }
@@ -4753,6 +4470,16 @@ struct UsageWidgetView: View {
 
     @ViewBuilder
     private var dashboardTabContent: some View {
+        if selectedDashboardTab != .tasks && !historyDetailsReady {
+            VStack(spacing: dashboardCardPadding) {
+                Image(systemName: "clock.arrow.circlepath")
+                Text(store.homeStatusText(kind: selectedDashboardTab == .leadership ? .leadership : .local, language: language))
+                Text(language.text("历史明细准备完成后会自动显示。", "Historical details will appear when ready."))
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 274)
+        } else {
         switch selectedDashboardTab {
         case .tasks:
             taskBoardContent
@@ -4786,6 +4513,11 @@ struct UsageWidgetView: View {
                 language: language
             )
         }
+        }
+    }
+
+    private var historyDetailsReady: Bool {
+        store.homeStatus(kind: selectedDashboardTab == .leadership ? .leadership : .local).hasDetails
     }
 
     private var taskBoardContent: some View {
@@ -4796,6 +4528,8 @@ struct UsageWidgetView: View {
                     runtimeScope: store.selectedRuntimeScope,
                     language: language,
                     focusedThreadID: focusedThreadID,
+                    dataAvailable: snapshot.taskBoard != nil,
+                    pendingLabel: store.homeStatusText(kind: .tasks, language: language),
                     onOpenSession: { threadID in
                         CodexSessionOpener.open(threadID: threadID)
                     }
@@ -4809,8 +4543,9 @@ struct UsageWidgetView: View {
         HStack(spacing: 8) {
             AppUpdateFooterButton(updateStore: updateStore, language: language)
             Spacer()
-            Text("\(language.text("刷新", "Refreshed")) \(timeOnly(snapshot.refreshedAt, language: language))")
+            Text(store.homeUpdateSummary(language: language))
                 .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
                 .foregroundStyle(.secondary)
                 .help(dataTrustHelp)
             if let shortcut = settings.globalShortcut {
@@ -4822,25 +4557,31 @@ struct UsageWidgetView: View {
     }
 
     private var dataTrustHelp: String {
-        guard let runtime = store.runtimeSnapshot(for: store.selectedRuntimeScope) else {
-            return language.text("数据暂不可用", "Data unavailable")
-        }
-        let status = runtime.status.localized(language)
-        return language.text(
-            "状态：\(status)\n额度：\(runtime.quotaSourceLabel)\n用量：\(runtime.usageSourceLabel)\n最后成功刷新：\(timeOnly(snapshot.refreshedAt, language: language))",
-            "Status: \(status)\nQuota: \(runtime.quotaSourceLabel)\nUsage: \(runtime.usageSourceLabel)\nLast refresh: \(timeOnly(snapshot.refreshedAt, language: language))"
+        let quota = store.homeStatusText(kind: .quota, language: language)
+        let local = store.homeStatusText(kind: .local, language: language)
+        let tasks = store.homeStatusText(kind: .tasks, language: language)
+        let leadership = store.homeStatusText(kind: .leadership, language: language)
+        let sources = store.runtimeSnapshot(for: store.selectedRuntimeScope)
+        let sourceHelp = language.text(
+            "\n来源：官方额度接口 / 本机记录。读取未完成时可刷新重试。",
+            "\nSources: quota API / local records. Refresh to retry unavailable data."
         )
+        return language.text(
+            "额度：\(quota)\n本机统计：\(local)\n任务：\(tasks)\n领导力：\(leadership)",
+            "Quota: \(quota)\nLocal usage: \(local)\nTasks: \(tasks)\nLeadership: \(leadership)"
+        ) + (sources == nil ? "" : sourceHelp)
     }
 
     private var taskBoardSummary: String {
-        guard let board = snapshot.taskBoard else { return language.text("读取中", "Loading") }
-        return language.text(
-            "\(board.totalCount) 事项 · \(timeOnly(board.refreshedAt, language: language))",
-            "\(board.totalCount) items · \(timeOnly(board.refreshedAt, language: language))"
-        )
+        let status = store.homeStatusText(kind: .tasks, language: language)
+        guard let board = snapshot.taskBoard else { return status }
+        return language.text("\(board.totalCount) 事项 · \(status)", "\(board.totalCount) items · \(status)")
     }
 
     private var dashboardSummary: String {
+        if selectedDashboardTab != .tasks && !historyDetailsReady {
+            return store.homeStatusText(kind: selectedDashboardTab == .leadership ? .leadership : .local, language: language)
+        }
         switch selectedDashboardTab {
         case .tasks:
             return taskBoardSummary
@@ -4854,7 +4595,7 @@ struct UsageWidgetView: View {
                 "Score \(score) · \(report.activeDayCount)/28 active days"
             )
         case .usage:
-            guard let trend = snapshot.local?.usageTrend else { return language.text("读取中", "Loading") }
+            guard let trend = snapshot.local?.usageTrend else { return store.homeStatusText(kind: .local, language: language) }
             let quality = trend.sourceQuality == .approximate ? language.text("粗略统计", "Approx.") : language.text("精细统计", "Detailed")
             return language.text("\(trend.activeDayCount) 活跃日 · \(quality)", "\(trend.activeDayCount) active days · \(quality)")
         case .inference:
@@ -4887,14 +4628,8 @@ struct UsageWidgetView: View {
     }
 
     private var shouldShowEnvironmentChecklist: Bool {
-        if snapshot.messages.contains("正在读取 codexU 数据") { return false }
-        let quotaUnavailable = snapshot.fiveHourQuota == nil
-            && snapshot.sevenDayQuota == nil
-            && snapshot.monthlyQuota == nil
-        let hasQuotaProtocolWarning = snapshot.messages.contains { $0.contains("额度窗口") }
-        return (!snapshot.messages.isEmpty && (quotaUnavailable || hasQuotaProtocolWarning || snapshot.local == nil))
-            || snapshot.account == nil
-            || snapshot.local == nil
+        store.homeStatus(kind: .quota).phase == .unavailable
+            || store.homeStatus(kind: .local).phase == .unavailable
     }
 
     private var environmentDiagnostics: [DiagnosticItem] {
@@ -4917,7 +4652,7 @@ struct UsageWidgetView: View {
                 ))
             }
 
-            if snapshot.local == nil || snapshot.local?.detailedUsage == nil {
+            if store.homeStatus(kind: .local).phase == .unavailable {
                 items.append(DiagnosticItem(
                     id: "claude-local-usage",
                     title: language.text("暂无 Claude Code 本机用量记录", "No local Claude Code usage records yet"),
@@ -4957,22 +4692,22 @@ struct UsageWidgetView: View {
                 items.append(DiagnosticItem(
                     id: "app-server",
                     title: language.text("Codex 账户接口暂不可用", "Codex account API unavailable"),
-                    detail: language.text("确认 Codex 已登录后点击刷新；本机 token 统计仍可继续显示。", "Make sure Codex is signed in, then refresh. Local token stats can still be shown."),
+                    detail: language.text("账户接口未返回可用结果，可点击刷新重试。", "The account API did not return a usable result. Refresh to retry."),
                     systemName: "exclamationmark.triangle.fill",
                     tint: FixedVisualPalette.statusWarning
                 ))
             } else {
                 items.append(DiagnosticItem(
                     id: "quota-unavailable",
-                    title: language.text("账户额度读取中", "Reading account quota"),
-                    detail: language.text("如果长时间无数据，请确认 Codex 已安装并完成登录。", "If data does not appear, make sure Codex is installed and signed in."),
+                    title: language.text("暂未取得账户额度", "Account quota unavailable"),
+                    detail: language.text("数据源暂未返回可用额度，可点击刷新重试。", "The data source has not returned quota. Refresh to retry."),
                     systemName: "person.crop.circle.badge.questionmark",
                     tint: FixedVisualPalette.statusInfo
                 ))
             }
         }
 
-        if snapshot.local == nil {
+        if store.homeStatus(kind: .local).phase == .unavailable {
             if messages.contains("state_5.sqlite") {
                 items.append(DiagnosticItem(
                     id: "sqlite-db",
@@ -7842,8 +7577,8 @@ struct WoolProgressCard: View {
                     .monospacedDigit()
                     .help(usesReferencePricing
                         ? language.text(
-                            "包含尚无官方价格的模型；相关用量按 GPT-5.5 参考价折算",
-                            "Includes models without official pricing; those tokens use the GPT-5.5 reference rate"
+                            "包含缺少专属价格的模型或计费条件，按参考费率折算；不代表实际账单",
+                            "Includes reference rates for unpriced models or billing conditions; this is not an actual bill"
                         )
                         : language.text("按对应模型的官方 API 价格估算", "Estimated with each model's official API price"))
                 Text("/ \(formatCompactUSD(maxValue))")
@@ -8579,8 +8314,8 @@ struct ModelUsageAreaChartCard: View {
         if costAvailable {
             if usesReferencePricing {
                 return language.text(
-                    "部分模型没有独立价格，费用按 GPT-5.5 价格作参考折算；不代表官方账单。",
-                    "Some models have no dedicated price, so cost uses GPT-5.5 pricing as a reference; this is not an official bill."
+                    "包含缺少专属价格的模型或计费条件，按参考费率折算；不代表实际账单。",
+                    "Includes reference rates for unpriced models or billing conditions; this is not an actual bill."
                 )
             }
             return language.text(
@@ -10190,6 +9925,8 @@ struct TaskBoardColumnView: View {
     let runtimeScope: RuntimeScope
     let language: WidgetLanguage
     let focusedThreadID: String?
+    var dataAvailable: Bool = true
+    var pendingLabel: String = ""
     let onOpenSession: (String) -> Bool
     @Environment(\.colorScheme) private var colorScheme
 
@@ -10202,7 +9939,7 @@ struct TaskBoardColumnView: View {
                 Text(localizedTaskColumnTitle(column.id, runtimeScope: runtimeScope, language: language))
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
-                Text("\(column.count)")
+                Text(dataAvailable ? "\(column.count)" : "--")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -10216,10 +9953,11 @@ struct TaskBoardColumnView: View {
                 VStack(spacing: 5) {
                     Image(systemName: "circle.dashed")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                    Text(language.text("暂无", "No items"))
+                        .foregroundStyle(.secondary)
+                    Text(dataAvailable ? language.text("暂无", "No items") : pendingLabel)
+                        .multilineTextAlignment(.center)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 66)
@@ -10900,12 +10638,7 @@ private func fullDateText(_ date: Date, language: WidgetLanguage) -> String {
 }
 
 private func localDayKey(_ date: Date, calendar: Calendar = .current) -> String {
-    let formatter = DateFormatter()
-    formatter.calendar = calendar
-    formatter.timeZone = calendar.timeZone
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyy-MM-dd"
-    return formatter.string(from: date)
+    statisticsDayKey(date, calendar: calendar)
 }
 
 private func formatTokens(_ value: Int64?) -> String {
@@ -10969,7 +10702,7 @@ private func formatSignedPercent(_ value: Double) -> String {
     return String(format: "%+.0f%%", value)
 }
 
-private func toolCategory(for name: String) -> String {
+func toolCategory(for name: String) -> String {
     let normalized = name.lowercased()
     if normalized.contains("exec") || normalized.contains("shell") || normalized.contains("stdin") {
         return "terminal"
@@ -12295,6 +12028,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 @main
 struct codexUMain {
     static func main() {
+        if CommandLine.arguments.contains("--maintain-history-index") {
+            exit(UsageHistoryProbe.maintainReports() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--probe-history-index") {
+            exit(UsageHistoryProbe.run() ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--self-test-global-shortcut") {
             exit(GlobalShortcutSelfTest.run() ? 0 : 1)
         }
@@ -12337,6 +12076,9 @@ struct codexUMain {
             exit(StatisticsTimeZoneSelfTest.run() ? 0 : 1)
         }
 
+        if CommandLine.arguments.contains("--self-test-history-index") {
+            exit(UsageIndexSelfTest.run() ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--self-test-token-counter") {
             exit(CodexTokenCounterNormalizerSelfTest.run() ? 0 : 1)
         }
@@ -12355,10 +12097,6 @@ struct codexUMain {
 
         if CommandLine.arguments.contains("--self-test-app-server-pipe") {
             exit(POSIXPipeReaderSelfTest.run() ? 0 : 1)
-        }
-
-        if CommandLine.arguments.contains("--self-test-codex-executable") {
-            exit(CodexExecutableResolverSelfTest.run() ? 0 : 1)
         }
 
         if CommandLine.arguments.contains("--self-test-task-runtime") {
@@ -12389,6 +12127,30 @@ struct codexUMain {
             exit(PhaseOneGateCommand.run(arguments: CommandLine.arguments))
         }
 
+        if CommandLine.arguments.contains("--usage-parse-helper") {
+            exit(UsageParseHelper.runChild())
+        }
+        if CommandLine.arguments.contains("--self-test-home-startup") {
+            exit(HomeStartupSelfTest.run() ? 0 : 1)
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--read-home-tasks"),
+           CommandLine.arguments.indices.contains(index + 1),
+           let scope = RuntimeScope(rawValue: CommandLine.arguments[index + 1]) {
+            guard Darwin.setpgid(0, 0) == 0 || Darwin.getpgrp() == Darwin.getpid() else { exit(2) }
+            exit(HomeTaskReader.runChild(scope: scope))
+        }
+        if CommandLine.arguments.contains("--self-test-home-task-reader") {
+            exit(HomeTaskReader.selfTest() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--probe-home") {
+            exit(HomeStartupProbe.run() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--self-test-home-snapshot") {
+            exit(HomeSnapshotStoreSelfTest.run() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--self-test-runtime-fast-sources") {
+            exit(RuntimeFastSourceSelfTest.run() ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--dump-json") {
             dumpJSON(MultiRuntimeUsageReader().load())
             return
@@ -12398,5 +12160,25 @@ struct codexUMain {
         let delegate = AppDelegate()
         app.delegate = delegate
         app.run()
+    }
+}
+
+
+func priceArchivedContribution(_ value: UsageDayContribution) -> PricedTokenUsage {
+    let price = modelTokenPrice(for: value.model)
+    return PricedTokenUsage(tokens: value.tokens,
+        estimatedCostUSD: estimatedCostUSD(tokens: value.tokens, price: price, serviceTier: value.serviceTier),
+        usesReferencePricing: price.isReference(serviceTier: value.serviceTier))
+}
+
+extension CodexUsageReader {
+    func archivedTrend(days: [String: PricedTokenUsage], statistics: StatisticsContext, models: [String: [String: PricedTokenUsage]] = [:], names: [String: String] = [:]) -> UsageTrend {
+        let today = statistics.startOfDay(for: statistics.now)
+        let calendar = statistics.calendar
+        return makeUsageTrend(dailyUsage: days, dayStart: today,
+            sevenDayStart: calendar.date(byAdding: .day, value: -6, to: today)!,
+            trendStart: calendar.date(byAdding: .day, value: -190, to: today)!,
+            monthStart: calendar.date(from: calendar.dateComponents([.year, .month], from: today))!,
+            sourceQuality: .detailed, modelDailyUsage: models, modelNamesByID: names, calendar: calendar)
     }
 }

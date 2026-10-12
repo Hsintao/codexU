@@ -447,8 +447,7 @@ final class CodexAppServerTaskClient: CodexTaskEventClient {
     }
 
     private func resolveCodexExecutableURL() -> URL? {
-        CodexExecutableResolver.resolve(isExecutable: { fileManager.isExecutableFile(atPath: $0) })
-            .map { URL(fileURLWithPath: $0) }
+        CodexExecutableLocator.resolve()
     }
 
     private static func integerID(_ value: Any?) -> Int64? {
