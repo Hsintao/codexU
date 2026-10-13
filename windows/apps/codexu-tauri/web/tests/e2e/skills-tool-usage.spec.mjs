@@ -24,8 +24,19 @@ test('renders multiple tool names and counts in the Skills surface', async ({ pa
   await expect(panel).toContainText('2 total');
   await expect(panel).toContainText('read_file');
   await expect(panel).toContainText('apply_patch');
-  await expect(panel).toContainText('2');
-  await expect(panel).toContainText('1');
+  await expect(panel).toContainText('2 calls');
+  await expect(panel).toContainText('1 call');
+  const tokenEstimate = panel.getByText('≈1.2K', { exact: true });
+  await expect(tokenEstimate).toBeVisible();
+  await tokenEstimate.hover();
+  await expect(tokenEstimate).toHaveAttribute('title', 'Tokens allocated by tool call count.');
+  await expect(panel.getByText('≈600', { exact: true })).toBeVisible();
+  await expect(panel).not.toContainText('est.');
+  await expect(panel).not.toContainText('% of top Skill');
+  const skillBar = panel.locator('.skill-activity-bar').first();
+  await skillBar.hover();
+  await expect(skillBar).toHaveAttribute('title', '100% of top Skill');
+  await expect(skillBar).toHaveAttribute('aria-label', 'Relative activity 100%');
   await expect(panel).not.toContainText('private-user');
   await expect(panel).not.toContainText('secret.txt');
 
