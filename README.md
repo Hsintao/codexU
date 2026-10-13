@@ -8,7 +8,7 @@ codexU v1.3.2 修复 ChatGPT 升级后的 macOS 额度读取，并通过本地�
 
 - **一眼看懂 AI 组织规模**：主视觉同时展示领导力得分、28 天领导 Agent 数、AI 工时和峰值并发；轨道节点随今日 Agent 动态运行。
 - **不是靠 token 刷分**：只使用本机可验证或可推导的 Agent 生命周期、父子关系、并发与自主运行证据；不可靠的成本、交付和估算区间不进入得分。
-- **Codex + Claude Code 合并评估**：AI 领导力衡量的是你调动的完整 AI 劳动力，不按 Runtime 拆分，也不把跨项目峰值简单相加。
+- **Codex + Claude Code + Kimi 合并评估**：AI 领导力衡量的是你调动的完整 AI 劳动力，不按 Runtime 拆分，也不把跨项目峰值简单相加。
 - **从“碳基牛马”到“人类最强者”**：七级徽章、固定 0–100 等级进度与指挥半径动效，让得分既可解释，也有鲜明的个人成长标识。
 - **本地优先、隐私优先**：评分全程在 Mac 本机完成，不上传 usage、线程、路径、日志或账户数据。
 
@@ -17,7 +17,7 @@ codexU v1.3.2 修复 ChatGPT 升级后的 macOS 额度读取，并通过本地�
 
 [产品官网](https://shanggqm.github.io/codexU-site/) · [下载最新版本](https://github.com/shanggqm/codexU/releases/latest) · [English](README.en.md)
 
-codexU 是一个 macOS 菜单栏与桌面应用，用来查看 OpenAI Codex / ChatGPT Codex 和 Claude Code 的额度窗口、token 用量、今日任务和本机 AI 领导力。它把常用信息放在菜单栏和主窗口里，帮助你快速判断剩余额度、重置时间、当天工作进展，以及一个人正在调动多少 AI 劳动力。
+codexU 是一个 macOS 菜单栏与桌面应用，用来查看 OpenAI Codex / ChatGPT Codex、Claude Code 和 Kimi 的额度窗口、token 用量、今日任务和本机 AI 领导力。它把常用信息放在菜单栏和主窗口里，帮助你快速判断剩余额度、重置时间、当天工作进展，以及一个人正在调动多少 AI 劳动力。
 
 ## Windows 版本已发布
 
@@ -49,7 +49,7 @@ Windows 版本是独立的 Tauri 桌面实现，当前发布包尚未由仓库�
 ## 适合谁
 
 - 经常使用 OpenAI Codex、Codex CLI 或 Codex 桌面应用的开发者。
-- 同时使用 Codex 和 Claude Code 做开发，希望在一个入口查看两边本机用量的人。
+- 同时使用 Codex、Claude Code 和 Kimi 做开发，希望在一个入口查看各家本机用量与额度的人。
 - 需要快速查看 5 小时/7 天额度、token 用量和重置时间的 ChatGPT Pro / Team 用户。
 - 想在桌面查看 Codex 使用状态、减少反复打开浏览器或终端的人。
 
@@ -71,8 +71,9 @@ Windows 版本是独立的 Tauri 桌面实现，当前发布包尚未由仓库�
 - 汇总今日、近 7 天和累计 token 用量，并细分未缓存输入、命中缓存输入和输出。
 - 按 OpenAI API token 价格估算本月 API 等效价值，并在 Plus、Pro 100、Pro 200 和满额月价值之间展示进度刻度。
 - 在顶部概览最左侧用“等级徽章 + 指挥半径轨道”展示滚动 28 天 AI 领导力：徽章固定在圆心，得分、近 28 天领导 Agent、近 28 天 AI 工时和峰值并发使用 2×2 指标矩阵；轨道节点仍按今日 Agent 动态变化。双环紧随其右并保持原尺寸，左上角明确标注“用量”。
-- 下方仪表盘支持今日任务、AI 领导力、用量趋势、项目排行和 Skill 使用视图。AI 领导力始终评估 Codex 与 Claude Code 的合计表现；详情顶部用完整徽章路径展示全部等级节点，分值直接标在进度条上，再以四个核心指标、四维能力、每日 AI 工时/Agent/峰值组合趋势和项目贡献解释得分。
+- 下方仪表盘支持今日任务、AI 领导力、用量趋势、项目排行和 Skill 使用视图。AI 领导力始终评估 Codex、Claude Code 与 Kimi 的合计表现；详情顶部用完整徽章路径展示全部等级节点，分值直接标在进度条上，再以四个核心指标、四维能力、每日 AI 工时/Agent/峰值组合趋势和项目贡献解释得分。
 - 今日任务按事实源自适应组织：Codex 使用“最近活跃、待继续、定时、今日归档”，Claude Code 使用本机 task 的“进行中、待处理、计划中、已完成”；近期活动与归档都不会被包装成仍在执行或成功完成。
+- Kimi 今日任务读取本机会话元数据，按所选统计时区显示今天的“最近活跃 / 待继续”：最近 2 小时有活动归为最近活跃，其余今日会话归为待继续；展示会话标题、工作区简称和活动时间，不据此判断执行或完成状态。今日没有会话显示“今日暂无会话”，读取失败保留上次结果并允许重试。
 - Codex 今日任务顶部按“模型 × 推理强度”展示本机实测散点图，并可在右上角切换今日（默认）、7 日均和 28 日均。横轴为所选窗口内完整调用耗时 P50、横线延伸到 P90，横轴上限为所有组合最大 P90 的 1.4 倍；纵轴为输出 tokens 除以完整调用耗时。今日气泡大小代表模型调用数，7/28 日气泡使用记录覆盖期内的日均调用数，避免周期长度放大气泡；它们都不是 Session、线程或工具调用数。样本会持久化到本机 Application Support，并从最近 28 天 rollout 回填，不记录 prompt、回复或路径。悬停气泡可查看总调用数、日均调用数、平均/P50/P90、有效吞吐、吞吐计算口径，以及 reasoning tokens 在全部输出中的数量和占比。该指标用于持续比较客观体感，不冒充 TTFT 或可见文本解码 TPS。
 - 任务卡片优先展示标题、工作区、事实时间和可信状态；可确定时显示 automation 下次运行时间，只有存在有效 Session Deep Link 的卡片才提供整卡点击、hover、手型和键盘焦点反馈。
 - Codex 用量趋势展示最近半年的每日 token 热力图和模型活动概览，概览包含当前范围内的用量最高模型、活跃日期数、活跃模型数和范围日均用量；Claude Code 暂不支持模型归因，保留原有近 7 日摘要。
@@ -128,7 +129,7 @@ codexU 目前通过 GitHub Release 的 DMG 安装包分发，不经过 Mac App S
 
 也可以在 Finder 中右键点击 `CodexU.app`，选择 **打开**，再确认系统安全提示。
 
-codexU 需要读取本机 `~/.codex/` 下的 Codex 数据；如果启用 Claude Code 统计，还会读取 `~/.claude/` 下的本机 transcript、任务和状态缓存。如果 macOS 弹出文件或文件夹访问授权，请允许访问，否则小组件无法读取本机 usage、线程和自动化任务信息。
+codexU 需要读取本机 `~/.codex/` 下的 Codex 数据；如果启用 Claude Code 统计，还会读取 `~/.claude/` 下的本机 transcript、任务和状态缓存；如果启用 Kimi，会读取 `~/.kimi-code/` 下的本机凭证和会话日志。如果 macOS 弹出文件或文件夹访问授权，请允许访问，否则小组件无法读取本机 usage、线程和自动化任务信息。
 
 ## 安装
 
@@ -160,6 +161,9 @@ codexU 需要读取本机 `~/.codex/` 下的 Codex 数据；如果启用 Claude 
 - 已登录 Codex 账户，额度信息才会显示。
 - Codex 至少使用过一次，以便生成 `~/.codex/state_5.sqlite`。
 - Claude Code 统计为可选能力；历史 token 来自 `~/.claude/projects/**/*.jsonl`，额度需要本地 statusLine snapshot cache。
+- Kimi 额度为可选能力；可在设置页填写 Kimi Code 平台的 `sk-kimi-xxx` API Key（保存在本机 Keychain，旧偏好中的 Key 会迁移后删除）；未填写时读取本机 `~/.kimi-code/credentials/kimi-code.json`。
+- Kimi 本机 token 统计来自 `~/.kimi-code/sessions/**/agents/*/wire.jsonl`，只累计 `usage.record` 事件、按模型与会话去重；`token_counting.*` 是上下文水位，不计入。只覆盖本机跑过的会话，是可追溯下限。
+- Kimi 日志不提供费用口径，费用显示 `--`，趋势图仅展示 token；日志读取失败会提示统计可能不完整，并在下次刷新重试。
 - 从源码构建时需要 Xcode Command Line Tools。
 
 ### Windows
@@ -228,10 +232,17 @@ Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTI
 - 用量趋势和项目排行：本机 session `token_count` 事件聚合；模型曲线优先按同一 session 中、位于 token 事件之前最近的 `turn_context.model` 归因。该 turn context 未记录模型时不会沿用上一轮，而是回退到线程模型。缺失精细事件时，日归因整体回退到线程更新时间的粗略口径；模型面积图在 Codex runtime 中按 Top 8 + 其他模型展示，并叠加全局总用量虚线，费用口径始终是本地 API 等效估算。Claude Code 暂不提供模型归因或模型面积图。
 - 工具和 Skill 使用：本机 session 事件中的工具调用与 Skill 加载记录。
 - 定时任务：`~/.codex/automations/**/automation.toml` 中启用的 automation 元数据；周期、时区和时间足够明确时在本机计算下次运行，规则不完整时不猜测。
-- AI 领导力：Codex 只读取本机线程关系与 `task_started` / `task_complete` 结构事件；Claude Code 只读取 `turn_duration` 与 Subagent 生命周期。ScoreModel v1.3 只让事实或可推导区间进入管理半径、劳动力杠杆、编排能力、自主运行四维得分，估算区间不计分；证据可信度独立展示，不乘入得分。
+- AI 领导力：Codex 只读取本机线程关系与 `task_started` / `task_complete` 结构事件；Claude Code 只读取 `turn_duration` 与 Subagent 生命周期；Kimi 从会话 `state.json` 的 Agent 名册和 `agent.turn.started` / `agent.turn.ended`（旧日志为 `turn.ended` 时长）读取主 Agent 与 Subagent 的已结束区间。Kimi 读取失败或超出处理预算时保留上次完整结果，明确提示重试，不截断后发布完整统计。ScoreModel v1.4 只让事实或可推导区间进入管理半径、劳动力杠杆、编排能力、自主运行四维得分，估算区间不计分；证据可信度独立展示，不乘入得分。
 - Claude Code 历史 token：`~/.claude/projects/**/*.jsonl` 中 assistant message 的 `message.usage` 字段。
 - Claude Code 工具、Skill 和任务：transcript 中的 `tool_use.name` / 显式 Skill attribution，以及 `~/.claude/tasks/**/*.json`；Skill 路径缺失时按 Claude Code 的个人、项目、嵌套、插件和旧版 command 路径在当前文件系统中回退推断，无法确认时显示“当前未定位”。
 - Claude Code active 额度：可选读取 `~/Library/Caches/codexU/claude-code/statusline-snapshot.json`；缺失时 5 小时/7 日额度显示为 `--`。
+- Kimi 官方额度：读取 Kimi Coding Plan 的 `GET {base}/usages`（默认 `https://api.kimi.com/coding/v1`），映射 5 小时、7 日和月度窗口；凭证来自本机 `~/.kimi-code/credentials/kimi-code.json`（过期时用 refresh token 刷新，刷新结果只留在内存中，不回写 Kimi Code 的文件）或设置页手填的 Key。接口未返回的窗口保持隐藏，读取失败会保留上一次成功值并标记为过期。
+- Kimi 今日任务：`~/.kimi-code/sessions/<workspace>/session_<id>/state.json` 中的 `title`、`workDir` 和 `updatedAt`；兼容 ISO 时间与毫秒时间戳，按会话 ID 去重，不解析对话正文，不提供 Codex Session 跳转。
+- Kimi 本机 token：`~/.kimi-code/sessions/**/agents/*/wire.jsonl` 中的 `usage.record` 事件，累加 `inputOther`（cache miss）、`inputCacheRead`（缓存命中）、`inputCacheCreation`（缓存创建）和 `output`；经 Kimi Code CLI 的全部提供商路由都计入并按模型拆分展示。缓存读取是长会话的绝对主体，占比可达九成以上。
+- Kimi 项目排行：按会话 `state.json` 中的 `cwd` 归因工作目录；未记录 cwd 的会话仍计入总量，但不会被包装成一个项目。
+- Kimi 工具与 Skill：同一份会话日志中的 `tool.call` 事件；`Skill` 调用按 `args.skill` 归入 Skill 统计（不重复计入工具），token 估算来自当前文件系统里的 SKILL.md，定位不到时不伪造估算。
+- Kimi 推理性能：配对本机 `llm.request` 与 `usage.record` 得到单次调用时长，按模型 × thinking effort 分组给出次数、均值、p50/p90 和有效输出速度；只在当前设备有可比性，跨设备、跨版本不横评。
+- Kimi 用量趋势与项目排行中的会话数：按模型拆分 180 天桶与 7 日排序；项目会话数按贡献会话文件去重。
 - 更新检测：默认访问 GitHub Releases API，读取 `shanggqm/codexU` 的公开 release 元数据，并把检查结果缓存到 `~/Library/Caches/codexU/update-check.json`。
 
 当前 Codex 额度 API 暴露的是滚动窗口百分比和重置时间，不暴露绝对配额数量；Claude Code 首版只读取本地历史记录和可选 active snapshot，不代表 Claude.ai 官方账单。更完整的数据口径和回退策略见 [RESEARCH.md](RESEARCH.md)。

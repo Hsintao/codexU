@@ -15,6 +15,28 @@ enum UsageIndexedReportsSelfTest {
             let context = try store.ensureProjectionContext(root: "reports", statistics: statistics, now: now)
             var intervals: [LeadershipInterval] = []
             var workers: [LeadershipWorker] = []
+            // Kimi has no fact projection: its turns arrive as extra intervals and
+            // must sweep as one timeline with the projected runtimes.
+            let kimiProjectPath = "/project-kimi"
+            let kimiProjectID = UsageLeadershipAdapter.projectID(runtime: "kimi", path: kimiProjectPath)
+            let kimiMainID = "kimi:main:session-1", kimiSubID = "kimi:subagent:session-1:agent-0"
+            let kimiWorkers = [
+                LeadershipWorker(id: kimiMainID, runtime: .kimi, kind: .main, projectID: kimiProjectID,
+                                 projectName: URL(fileURLWithPath: kimiProjectPath).lastPathComponent, parentID: nil),
+                LeadershipWorker(id: kimiSubID, runtime: .kimi, kind: .subagent, projectID: kimiProjectID,
+                                 projectName: URL(fileURLWithPath: kimiProjectPath).lastPathComponent, parentID: kimiMainID)
+            ]
+            let kimiIntervals = [
+                LeadershipInterval(id: "kimi:session-1:main:1", workerID: kimiMainID, runtime: .kimi, workerKind: .main,
+                                   projectID: kimiProjectID, startAt: now.addingTimeInterval(-3_600), endAt: now.addingTimeInterval(-1_800),
+                                   quality: .fact, isAutonomous: false),
+                LeadershipInterval(id: "kimi:session-1:agent-0:1", workerID: kimiSubID, runtime: .kimi, workerKind: .subagent,
+                                   projectID: kimiProjectID, startAt: now.addingTimeInterval(-2_400), endAt: now.addingTimeInterval(-1_200),
+                                   quality: .fact, isAutonomous: true),
+                LeadershipInterval(id: "kimi:session-1:main:2", workerID: kimiMainID, runtime: .kimi, workerKind: .main,
+                                   projectID: kimiProjectID, startAt: now.addingTimeInterval(-1_800), endAt: now.addingTimeInterval(-900),
+                                   quality: .fact, isAutonomous: false)
+            ]
             let scan = try store.beginDiscovery(root: "reports", runtime: "codex", now: now)
             for index in 0..<3 {
                 let id = "source-\(index)", project = "/project-\(index%2)"
@@ -60,14 +82,23 @@ enum UsageIndexedReportsSelfTest {
                 recordingStartedAt: parsed.inferenceSamples.map(\.completedAt).min()!, dayStart: statistics.startOfDay(for: now), calendar: statistics.calendar)
             try check(result.local.inferencePerformance == expected)
             phase = "leadership"
-            let leadership = try store.indexedLeadership(root: "reports", statistics: statistics)
-            let oracle = LeadershipAggregator().makeDashboard(workers: workers, intervals: intervals, now: now, calendar: statistics.calendar)
+            let leadership = try store.indexedLeadership(root: "reports", statistics: statistics,
+                extraIntervals: kimiIntervals, extraProjectPaths: [kimiProjectID: kimiProjectPath])
+            let oracle = LeadershipAggregator().makeDashboard(workers: workers + kimiWorkers,
+                intervals: intervals + kimiIntervals, now: now, calendar: statistics.calendar)
             for (actual, expected) in zip(leadership.reports, oracle.reports) {
                 try check(actual.score == expected.score && actual.agentCount == expected.agentCount && actual.activeDayCount == expected.activeDayCount)
                 try check(abs((actual.aiHours ?? 0)-(expected.aiHours ?? 0)) < 1e-9)
                 try check(abs((actual.autonomousHours ?? 0)-(expected.autonomousHours ?? 0)) < 1e-9)
                 try check(abs((actual.averageParallelism ?? 0)-(expected.averageParallelism ?? 0)) < 1e-9)
                 try check(actual.peakConcurrency == expected.peakConcurrency && actual.projectCount == expected.projectCount)
+                let kimiProject = actual.projects.first { $0.projectID == kimiProjectID }
+                let expectedKimiProject = expected.projects.first { $0.projectID == kimiProjectID }
+                try check(kimiProject != nil && expectedKimiProject != nil)
+                try check(kimiProject?.projectName == expectedKimiProject?.projectName)
+                try check(abs((kimiProject?.aiHours ?? 0)-(expectedKimiProject?.aiHours ?? 0)) < 1e-9)
+                try check(abs((kimiProject?.autonomousHours ?? 0)-(expectedKimiProject?.autonomousHours ?? 0)) < 1e-9)
+                try check(kimiProject?.agentCount == expectedKimiProject?.agentCount)
             }
             phase = "bounded report GC"
             let published = try store.beginDayArchive(context: context, root: "reports", dayKey: statistics.dayKey(for: now), now: now)

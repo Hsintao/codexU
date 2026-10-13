@@ -4,6 +4,7 @@ enum TaskSourceKind: String, Equatable {
     case codexThread
     case codexAutomation
     case claudeTask
+    case kimiSession
 }
 
 enum TaskDisplayState: String, Equatable {

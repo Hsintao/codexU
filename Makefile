@@ -36,7 +36,7 @@ endif
 
 POWERSHELL ?= powershell.exe
 
-.PHONY: build run probe test-rate-limits test-statistics-time-zone test-token-counter test-model-pricing test-model-usage-trend test-model-inference-performance test-app-server-pipe test-task-runtime test-leadership-model test-leadership-assets test-claude-skill-paths test-codex-session-link test-performance-monitor test-phase-one-gate test-particle-animation test-palettes test-macos-compatibility memory-risk-check phase-one-check phase-one-soak install dmg dmg-arm64 dmg-intel checksum checksum-arm64 checksum-intel release release-arm64 release-intel release-all release-package release-windows release-cross-platform-check release-check notarize verify clean clean-dist
+.PHONY: build run probe test-rate-limits test-statistics-time-zone test-token-counter test-model-pricing test-model-usage-trend test-model-inference-performance test-app-server-pipe test-task-runtime test-leadership-model test-leadership-assets test-kimi-leadership test-claude-skill-paths test-codex-session-link test-performance-monitor test-phase-one-gate test-particle-animation test-palettes test-macos-compatibility memory-risk-check phase-one-check phase-one-soak install dmg dmg-arm64 dmg-intel checksum checksum-arm64 checksum-intel release release-arm64 release-intel release-all release-package release-windows release-cross-platform-check release-check notarize verify clean clean-dist
 
 build: test-leadership-assets
 	rm -rf "$(APP_DIR)"
@@ -67,7 +67,20 @@ test-home-startup: build
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-startup
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-snapshot
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-runtime-fast-sources
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-quota
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-local-usage
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-leadership
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-keychain
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-tasks
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-task-reader
+
+.PHONY: test-kimi-tasks
+test-kimi-tasks: build
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-tasks
+
+.PHONY: test-kimi-leadership
+test-kimi-leadership: build
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-leadership
 
 test-rate-limits:
 	./scripts/test-rate-limits.sh

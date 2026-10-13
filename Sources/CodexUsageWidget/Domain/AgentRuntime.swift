@@ -3,6 +3,7 @@ import Foundation
 enum RuntimeScope: String, CaseIterable, Identifiable, Codable, Equatable, Hashable {
     case codex
     case claudeCode
+    case kimi
 
     var id: String { rawValue }
 
@@ -19,6 +20,8 @@ enum RuntimeScope: String, CaseIterable, Identifiable, Codable, Equatable, Hasha
             return "codex"
         case .claudeCode:
             return "claude-code"
+        case .kimi:
+            return "kimi"
         }
     }
 
@@ -28,6 +31,8 @@ enum RuntimeScope: String, CaseIterable, Identifiable, Codable, Equatable, Hasha
             return "Codex"
         case .claudeCode:
             return "Claude Code"
+        case .kimi:
+            return "Kimi"
         }
     }
 }
@@ -171,10 +176,14 @@ struct MultiRuntimeUsageSnapshot: Equatable {
         statisticsIdentity: .empty()
     )
 
-    var totalTodayTokens: Int64 {
-        runtimes.reduce(Int64(0)) { total, runtime in
-            total + (runtime.todayTokens ?? 0)
+    var totalTodayTokens: Int64? {
+        var total: Int64 = 0
+        for runtime in runtimes {
+            let sum = total.addingReportingOverflow(runtime.todayTokens ?? 0)
+            guard !sum.overflow else { return nil }
+            total = sum.partialValue
         }
+        return total
     }
 
     func runtime(for scope: RuntimeScope) -> RuntimeUsageSnapshot? {

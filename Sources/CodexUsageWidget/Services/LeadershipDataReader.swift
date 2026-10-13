@@ -3,7 +3,9 @@ import Foundation
 
 final class LeadershipDataReader {
     private let fileManager = FileManager.default
-    private let cacheVersion = 1
+    /// Bumped when the merged evidence set changes, so a cache written before
+    /// Kimi contributed is never restored as if it were current.
+    private let cacheVersion = 2
     private let maximumCacheEntries = 2_048
     private let maximumCacheBytes: Int64 = 64 * 1_024 * 1_024
     private let maximumSQLiteOutputBytes = 32 * 1_024 * 1_024
@@ -64,9 +66,11 @@ final class LeadershipDataReader {
             writeCache(cache, context: context)
         }
 
-        let workers = deduplicatedWorkers(parsedSources.compactMap(\.worker))
+        let kimi = KimiLeadershipReader().load(context: context)
+        guard kimi.error == nil else { return .empty }
+        let workers = deduplicatedWorkers(parsedSources.compactMap(\.worker) + kimi.workers)
         let intervalByID = Dictionary(
-            parsedSources.flatMap(\.intervals).map { ($0.id, $0) },
+            (parsedSources.flatMap(\.intervals) + kimi.intervals).map { ($0.id, $0) },
             uniquingKeysWith: { existing, _ in existing }
         )
         return LeadershipAggregator().makeDashboard(

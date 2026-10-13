@@ -110,7 +110,7 @@ enum GlobalShortcutSelfTest {
         withDefaults { defaults in
             let custom = self.shortcut(kVK_ANSI_K, cmdKey | shiftKey, "K")
             custom.save(defaults: defaults)
-            let settings = AppSettings(defaults: defaults)
+            let settings = AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)"))
             settings.globalShortcutRegistration = { _ in .success(()) }
             settings.globalShortcutUnregistration = { .success(()) }
             settings.resetGlobalShortcut()
@@ -130,7 +130,7 @@ enum GlobalShortcutSelfTest {
             let oldShortcut = self.shortcut(kVK_ANSI_K, cmdKey | shiftKey, "K")
             let candidate = self.shortcut(kVK_ANSI_L, cmdKey | shiftKey, "L")
             oldShortcut.save(defaults: defaults)
-            let settings = AppSettings(defaults: defaults)
+            let settings = AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)"))
             settings.globalShortcutRegistration = { _ in .failure(.occupied) }
             if settings.requestGlobalShortcut(candidate)
                 || settings.globalShortcut != oldShortcut
@@ -149,7 +149,7 @@ enum GlobalShortcutSelfTest {
         withDefaults { defaults in
             let oldShortcut = self.shortcut(kVK_ANSI_K, cmdKey | shiftKey, "K")
             oldShortcut.save(defaults: defaults)
-            let settings = AppSettings(defaults: defaults)
+            let settings = AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)"))
             settings.globalShortcutUnregistration = { .failure(.failed) }
             settings.clearGlobalShortcut()
             if settings.globalShortcut != oldShortcut
@@ -162,7 +162,7 @@ enum GlobalShortcutSelfTest {
         withDefaults { defaults in
             let custom = self.shortcut(kVK_ANSI_K, cmdKey | shiftKey, "K")
             custom.save(defaults: defaults)
-            let settings = AppSettings(defaults: defaults)
+            let settings = AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)"))
             settings.handleInitialGlobalShortcutFailure(defaultRegistered: true)
             if settings.globalShortcut != .default
                 || settings.globalShortcutError != .savedShortcutUnavailableUsingDefault
@@ -174,7 +174,7 @@ enum GlobalShortcutSelfTest {
         withDefaults { defaults in
             let custom = self.shortcut(kVK_ANSI_K, cmdKey | shiftKey, "K")
             custom.save(defaults: defaults)
-            let settings = AppSettings(defaults: defaults)
+            let settings = AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)"))
             settings.handleInitialGlobalShortcutFailure(defaultRegistered: false)
             if settings.globalShortcut != nil
                 || settings.globalShortcutError != .noShortcutAvailable

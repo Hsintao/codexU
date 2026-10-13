@@ -79,7 +79,7 @@ extension UsageIndexStore {
                        try observationIsCovered(source: source, revision: cut) {
                         try execute("INSERT INTO build_member(build_id,source_id,projection_id) VALUES (?,?,?)",
                             [.text(build), .text(source), .text(projection)])
-                    } else { cursor.missingSources += 1 }
+                    } else if try !sourceIsRetiredWithoutFacts(source: source, revision: cut) { cursor.missingSources += 1 }
                 }
                 if sources.isEmpty { cursor.stage = "days" }
             } else {

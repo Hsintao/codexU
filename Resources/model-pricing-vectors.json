@@ -218,5 +218,27 @@
     "tier": null,
     "expected": 0.466,
     "reference": false
+  },
+  {
+    "name": "K3 cache split",
+    "model": "kimi-k3",
+    "input": 1000000,
+    "cached": 400000,
+    "write": 100000,
+    "output": 50000,
+    "tier": null,
+    "expected": 2.67,
+    "reference": false
+  },
+  {
+    "name": "K3 subscription prefix alias",
+    "model": "kimi-code/kimi-k3",
+    "input": 2000000,
+    "cached": 0,
+    "write": 0,
+    "output": 0,
+    "tier": null,
+    "expected": 6,
+    "reference": false
   }
 ]

@@ -4,6 +4,19 @@ enum HomeDataKind: String, CaseIterable, Hashable {
     case quota, local, tasks, leadership
 }
 
+extension RuntimeScope {
+    /// Runtimes the history index builds archives for.
+    ///
+    /// The index models a fixed pair of source layouts (Codex rollouts and
+    /// Claude Code transcripts). Other runtimes read their own local source
+    /// directly, so the index must not be treated as their completeness gate.
+    static let historyIndexedScopes: [RuntimeScope] = [.codex, .claudeCode]
+
+    static var historyUnindexedScopes: [RuntimeScope] {
+        allCases.filter { !historyIndexedScopes.contains($0) }
+    }
+}
+
 struct HomeDataKey: Hashable {
     let scope: RuntimeScope?
     let kind: HomeDataKind
@@ -89,13 +102,13 @@ extension LocalUsage {
 }
 
 extension UsageSnapshot {
-    func replacingLocal(_ local: LocalUsage?, observedAt: Date? = nil) -> UsageSnapshot {
+    func replacingLocal(_ local: LocalUsage?, observedAt: Date? = nil, messages: [String]? = nil) -> UsageSnapshot {
         UsageSnapshot(
             refreshedAt: observedAt ?? refreshedAt, account: account,
             limitId: limitId, limitName: limitName, quotaReadSucceeded: quotaReadSucceeded,
             fiveHourQuota: fiveHourQuota, sevenDayQuota: sevenDayQuota,
             monthlyQuota: monthlyQuota, credits: credits, cloudLifetimeTokens: cloudLifetimeTokens,
-            local: local, taskBoard: taskBoard, messages: messages
+            local: local, taskBoard: taskBoard, messages: messages ?? self.messages
         )
     }
 }

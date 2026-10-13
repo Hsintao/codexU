@@ -39,15 +39,49 @@ extension UsageIndexStore {
 
     func observationIsCovered(source: String, revision: Int64) throws -> Bool {
         guard let observation = try rows("SELECT file_identity,target_end,status FROM source_observation WHERE source_id=? AND revision_id<=? ORDER BY revision_id DESC LIMIT 1",
-                                        [.text(source), .integer(revision)], limit: 1).first,
-              observation[2].text == "readable",
-              let generation = try rows("""
-                SELECT g.file_identity,c.complete_offset FROM source_generation g
-                JOIN checkpoint_version c ON c.source_id=g.source_id AND c.generation=g.generation
-                WHERE g.source_id=? AND g.valid_from<=? AND (g.valid_to IS NULL OR g.valid_to>?)
-                AND c.revision_id<=? ORDER BY c.revision_id DESC LIMIT 1
-                """, [.text(source), .integer(revision), .integer(revision), .integer(revision)], limit: 1).first,
-              let target = observation[1].integer, let offset = generation[1].integer else { return false }
-        return observation[0] == generation[0] && offset >= target
+                                        [.text(source), .integer(revision)], limit: 1).first else { return false }
+        // Repeated missing observations preserve the last non-missing state, including a
+        // failed read. Only a newer readable observation can resolve that failure.
+        let effective: [UsageSQLValue]
+        if observation[2].text == "missing" {
+            guard let readable = try rows("""
+                SELECT file_identity,target_end,status FROM source_observation
+                WHERE source_id=? AND revision_id<=? AND status<>'missing' ORDER BY revision_id DESC LIMIT 1
+                """, [.text(source), .integer(revision)], limit: 1).first,
+                  readable[2].text == "readable" else { return false }
+            effective = readable
+        } else {
+            guard observation[2].text == "readable" else { return false }
+            effective = observation
+        }
+        guard let generation = try rows("""
+            SELECT g.file_identity,c.complete_offset FROM source_generation g
+            JOIN checkpoint_version c ON c.source_id=g.source_id AND c.generation=g.generation
+            WHERE g.source_id=? AND g.valid_from<=? AND (g.valid_to IS NULL OR g.valid_to>?)
+            AND c.revision_id<=? ORDER BY c.revision_id DESC LIMIT 1
+            """, [.text(source), .integer(revision), .integer(revision), .integer(revision)], limit: 1).first,
+              let target = effective[1].integer, let offset = generation[1].integer else { return false }
+        return effective[0] == generation[0] && offset >= target
+    }
+
+    /// Retire only sources with no facts, no known nonempty input and no unresolved read failure.
+    /// A registered-but-never-observed source does not block archive coverage.
+    func sourceIsRetiredWithoutFacts(source: String, revision: Int64) throws -> Bool {
+        guard try rows("SELECT status FROM source_observation WHERE source_id=? AND revision_id<=? ORDER BY revision_id DESC LIMIT 1",
+                       [.text(source), .integer(revision)], limit: 1).first?.first?.text == "missing" else { return false }
+        let lastKnown = try rows("""
+            SELECT status,target_end FROM source_observation
+            WHERE source_id=? AND revision_id<=? AND status<>'missing' ORDER BY revision_id DESC LIMIT 1
+            """, [.text(source), .integer(revision)], limit: 1).first
+        guard lastKnown == nil || lastKnown == [.text("readable"), .integer(0)] else { return false }
+        guard try scalar("""
+            SELECT 1 FROM source_observation WHERE source_id=? AND revision_id<=? AND target_end>0 LIMIT 1
+            """, [.text(source), .integer(revision)]) == nil,
+              try scalar("""
+            SELECT 1 FROM checkpoint_version WHERE source_id=? AND revision_id<=?
+              AND (observed_end>0 OR complete_offset>0) LIMIT 1
+            """, [.text(source), .integer(revision)]) == nil else { return false }
+        return try scalar("SELECT 1 FROM fact WHERE source_id=? AND commit_revision<=? LIMIT 1",
+                          [.text(source), .integer(revision)]) == nil
     }
 }

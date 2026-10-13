@@ -171,7 +171,7 @@ struct LeadershipDashboardSnapshot: Equatable {
 }
 
 enum LeadershipScoreModel {
-    static let version = "1.3"
+    static let version = "1.4"
     static let minimumEvidenceCoverage = 0.70
     static let normalEvidenceCoverage = 0.90
 

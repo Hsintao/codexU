@@ -29,6 +29,42 @@ final class UsageIndexMaterializer {
         context = try store.ensureProjectionContext(root: root, statistics: statistics, now: Date())
         activeBuild = try store.rows("SELECT id FROM report_build WHERE context_id=? AND runtime=? AND state='building' ORDER BY created_at_ms LIMIT 1",
                                     [.text(context), .text(runtime)], limit: 1).first?.first?.text
+        try reconcileContextProjections()
+    }
+
+    /// Discovery only re-registers files that still exist. A source removed from disk would
+    /// otherwise never receive a materialize job for a fresh context, leaving every archive
+    /// partial. Projections rebuild from committed facts, so the file is not needed.
+    private func reconcileContextProjections() throws {
+        let revision = try store.scalar("SELECT max(id) FROM revision") ?? 0
+        var after = ""
+        while true {
+            let page = try store.rows("""
+                SELECT s.id FROM source s
+                WHERE s.root_id=?1 AND s.runtime=?2 AND s.id>?3
+                  AND NOT EXISTS (SELECT 1 FROM source_projection p JOIN source_generation g
+                    ON g.source_id=p.source_id AND g.generation=p.generation
+                    WHERE p.context_id=?4 AND p.source_id=s.id AND p.state='ready' AND p.input_revision<=?5
+                      AND g.valid_from<=?5 AND (g.valid_to IS NULL OR g.valid_to>?5)
+                      AND p.input_revision>=(SELECT max(revision_id) FROM checkpoint_version
+                        WHERE source_id=p.source_id AND generation=p.generation AND revision_id<=?5)
+                      AND p.input_revision>=(SELECT max(valid_from) FROM source_metadata_version
+                        WHERE source_id=p.source_id AND valid_from<=?5)
+                      AND COALESCE(p.dependency_revision,0)=COALESCE((SELECT max(d.valid_from) FROM dependency_version d
+                        WHERE d.child_source_id=p.source_id AND d.child_generation=p.generation AND d.valid_from<=?5
+                          AND (d.valid_to IS NULL OR d.valid_to>?5)),0)
+                      AND (s.runtime<>'claude-code' OR p.input_revision>=max(
+                        COALESCE((SELECT max(valid_from) FROM claude_message_owner WHERE source_id=s.id AND valid_from<=?5),0),
+                        COALESCE((SELECT max(valid_to) FROM claude_message_owner WHERE source_id=s.id AND valid_to<=?5),0))))
+                ORDER BY s.id LIMIT 100
+                """, [.text(root), .text(runtime), .text(after), .text(context), .integer(revision)], limit: 100)
+            if page.isEmpty { break }
+            for row in page {
+                guard let source = row[0].text else { throw UsageIndexError.cacheInvalid }
+                after = source
+                try enqueue(source)
+            }
+        }
     }
 
     func enqueue(_ source: String) throws {
@@ -36,6 +72,10 @@ final class UsageIndexMaterializer {
               try store.scalar("SELECT valid_from FROM source_generation WHERE source_id=? AND generation=?",[.text(source),.integer(checkpoint.generation)]) != nil,
               let metadata = try store.metadata(source: source, revision: Int64.max) else { return }
         var requested = max(checkpoint.revision, metadata.revision)
+        requested = max(requested, try store.scalar("""
+            SELECT max(valid_from) FROM dependency_version
+            WHERE child_source_id=? AND child_generation=? AND valid_to IS NULL
+            """, [.text(source), .integer(checkpoint.generation)]) ?? 0)
         if runtime == "claude-code" {
             requested = max(requested, try store.claudeOwnershipRevision(source: source, at: Int64.max))
         }

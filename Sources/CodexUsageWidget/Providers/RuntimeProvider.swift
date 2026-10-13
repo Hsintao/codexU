@@ -5,10 +5,32 @@ struct RuntimeLoadContext {
     let homeDirectory: URL
     let cacheDirectory: URL
     let statistics: StatisticsContext
+    /// Optional user-supplied Kimi Coding Plan API key. When nil, the Kimi
+    /// provider falls back to the locally stored Kimi Code credential.
+    let kimiAPIKey: String?
+    let kimiCredentialError: String?
+
+    init(
+        now: Date,
+        homeDirectory: URL,
+        cacheDirectory: URL,
+        statistics: StatisticsContext,
+        kimiAPIKey: String? = nil,
+        kimiCredentialError: String? = nil
+    ) {
+        self.now = now
+        self.homeDirectory = homeDirectory
+        self.cacheDirectory = cacheDirectory
+        self.statistics = statistics
+        self.kimiAPIKey = kimiAPIKey
+        self.kimiCredentialError = kimiCredentialError
+    }
 
     static func live(
         now: Date = Date(),
-        statisticsPreference: StatisticsTimeZonePreference = .default
+        statisticsPreference: StatisticsTimeZonePreference = .default,
+        kimiAPIKey: String? = nil,
+        kimiCredentialError: String? = nil
     ) -> RuntimeLoadContext {
         let environment = ProcessInfo.processInfo.environment
         let home = environment["CODEXU_HOME_OVERRIDE"].map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -17,11 +39,22 @@ struct RuntimeLoadContext {
             ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("codexU", isDirectory: true)
             ?? home.appendingPathComponent("Library/Caches/codexU", isDirectory: true)
+        var key = kimiAPIKey
+        var credentialError = kimiCredentialError
+        if key == nil, credentialError == nil {
+            do {
+                key = try KimiAPIKeyStore().loadMigrating(defaults: .standard)
+            } catch {
+                credentialError = (error as? KimiAPIKeyStore.Failure)?.message ?? "Kimi Keychain 读取失败"
+            }
+        }
         return RuntimeLoadContext(
             now: now,
             homeDirectory: home,
             cacheDirectory: cache,
-            statistics: StatisticsContext(preference: statisticsPreference, now: now)
+            statistics: StatisticsContext(preference: statisticsPreference, now: now),
+            kimiAPIKey: key,
+            kimiCredentialError: credentialError
         )
     }
 }
@@ -52,7 +85,8 @@ struct RuntimeProviderRegistry {
     init(providers: [any RuntimeUsageProvider]? = nil) {
         let baseProviders = providers ?? [
             CodexRuntimeProvider(),
-            ClaudeCodeRuntimeProvider()
+            ClaudeCodeRuntimeProvider(),
+            KimiRuntimeProvider()
         ]
         let filters = ProcessInfo.processInfo.environment["CODEXU_RUNTIME_FILTER"]?
             .split(separator: ",")

@@ -49,6 +49,8 @@ struct RuntimeSelector: View {
             return "Codex"
         case .claudeCode:
             return language.text("Claude Code", "Claude Code")
+        case .kimi:
+            return language.text("Kimi", "Kimi")
         }
     }
 }
@@ -525,6 +527,13 @@ struct RuntimeSummaryCard: View {
                     return summary.status == .stale ? "过期快照 + 本机统计" : "active snapshot + 本机统计"
                 }
                 return "本机统计；额度需 active snapshot"
+            case .kimi:
+                if hasQuota {
+                    return summary.status == .stale
+                        ? "Kimi 官方额度 · 快照过期 + 本机会话统计"
+                        : "Kimi 官方额度 + 本机会话统计"
+                }
+                return "本机会话统计；额度暂不可用"
             }
         }
         switch summary.scope {
@@ -538,6 +547,13 @@ struct RuntimeSummaryCard: View {
                 return summary.status == .stale ? "Stale snapshot + local records" : "Active snapshot + local records"
             }
             return "Local records; quota needs active snapshot"
+        case .kimi:
+            if hasQuota {
+                return summary.status == .stale
+                    ? "Kimi official quota · stale + local session logs"
+                    : "Kimi official quota + local session logs"
+            }
+            return "Local session logs; quota unavailable"
         }
     }
 }
@@ -584,6 +600,8 @@ struct RuntimeLogoView: View {
             return "terminal"
         case .claudeCode:
             return "curlybraces"
+        case .kimi:
+            return "sparkles"
         }
     }
 }
@@ -596,6 +614,8 @@ private enum RuntimeLogo {
             name = "codex-color"
         case .claudeCode:
             name = "claudecode-color"
+        case .kimi:
+            name = "kimi-color"
         }
         guard let url = Bundle.main.url(forResource: name, withExtension: "png") else {
             return nil

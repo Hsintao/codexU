@@ -59,6 +59,19 @@ struct CodexTokenEventIdentity: Codable, Equatable {
         secondaryHash = secondary
     }
 
+    /// Builds an identity from an arbitrary stable key. Runtimes whose events
+    /// carry no Codex token-counter samples (e.g. Kimi inference samples) use
+    /// this so the shared sample model can keep its identity requirement.
+    init(rawKey: String) {
+        var primary: UInt64 = 0xcbf29ce484222325
+        var secondary: UInt64 = 0x9e3779b97f4a7c15
+        for byte in rawKey.utf8 {
+            Self.mix(UInt64(byte), primary: &primary, secondary: &secondary)
+        }
+        primaryHash = primary
+        secondaryHash = secondary
+    }
+
     private static func values(from sample: CodexTokenCounterSample?) -> [Int64?] {
         guard let sample else { return [nil, nil, nil, nil, nil, nil] }
         return [

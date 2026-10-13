@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "verifiedAt": "2026-10-11",
+  "verifiedAt": "2026-10-13",
   "referenceModel": "gpt-5.5",
   "unit": "USD per 1M tokens",
   "models": [
@@ -493,6 +493,27 @@
       "fastSupportsLongContext": false,
       "usesReferencePricing": true,
       "source": "baseline macOS catalog; not reverified in CODEXU-016"
+    },
+    {
+      "model": "kimi-k3",
+      "aliases": [
+        "kimi-code/kimi-k3"
+      ],
+      "inputPerMillion": 3,
+      "cachedInputPerMillion": 0.3,
+      "cacheWriteInputPerMillion": 3,
+      "outputPerMillion": 15,
+      "tierMultipliers": {
+        "default": 1,
+        "standard": 1,
+        "auto": 1
+      },
+      "longContextThreshold": null,
+      "longContextInputMultiplier": null,
+      "longContextOutputMultiplier": null,
+      "fastSupportsLongContext": false,
+      "usesReferencePricing": false,
+      "source": "https://platform.moonshot.ai/docs/pricing/chat-k3 verified 2026-10-13; cache write not listed there, derived as 1x input from the CN table's default 5min TTL tier (https://platform.moonshot.cn/docs/pricing/chat)"
     }
   ]
 }

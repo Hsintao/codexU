@@ -252,6 +252,62 @@ enum HomeStartupSelfTest {
                    "stopped coordinators must ignore callbacks from outstanding workers")
         }
 
+        // Task-only polling must observe activity newer than the last full refresh.
+        // The previous-day case also verifies that polling advances the statistics epoch.
+        for age: TimeInterval in [300, 86_400] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("codexu-kimi-poll-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let sessions = root.appendingPathComponent(".kimi-code/sessions/workspace")
+            do {
+                try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+                let oldNow = Date().addingTimeInterval(-age)
+                let oldContext = RuntimeLoadContext(now: oldNow, homeDirectory: root,
+                    cacheDirectory: root.appendingPathComponent("cache"),
+                    statistics: StatisticsContext(preference: context.statistics.preference, now: oldNow),
+                    kimiAPIKey: "fixture-poll-key", kimiCredentialError: "fixture-poll-error")
+                var loaders = emptyLoaders()
+                loaders.tasks = { scope, request in
+                    guard scope == .kimi else { return nil }
+                    guard request.homeDirectory == oldContext.homeDirectory,
+                          request.cacheDirectory == oldContext.cacheDirectory,
+                          request.statistics.preference == oldContext.statistics.preference,
+                          request.statistics.resolvedIdentifier == oldContext.statistics.resolvedIdentifier,
+                          request.statistics.now == request.now,
+                          request.kimiAPIKey == oldContext.kimiAPIKey,
+                          request.kimiCredentialError == oldContext.kimiCredentialError else { return nil }
+                    return KimiTaskReader().loadTaskBoard(context: request)
+                }
+                let coordinator = UsageRefreshCoordinator(loaders: loaders, foregroundDeadline: 0.08, historyDelay: 0.01)
+                var latest: HomePresentation?
+                coordinator.onChange = { latest = $0 }
+                coordinator.start(context: oldContext)
+                defer { coordinator.stop() }
+                expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.taskBoard?.totalCount == 0 },
+                       "Kimi polling fixture must first publish its empty session directory")
+                let session = sessions.appendingPathComponent("session_poll")
+                try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+                let updatedAt = Date().addingTimeInterval(-30)
+                let metadata = try JSONSerialization.data(withJSONObject: [
+                    "title": "Polling fixture", "updatedAt": updatedAt.timeIntervalSince1970 * 1_000,
+                    "workDir": root.path
+                ])
+                try metadata.write(to: session.appendingPathComponent("state.json"))
+                coordinator.refreshTasks(scope: .kimi)
+                expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.taskBoard?.totalCount == 1 },
+                       "Kimi task polling must include sessions updated after the last full refresh")
+                expect((latest?.snapshot.runtime(for: .kimi)?.snapshot.taskBoard?.refreshedAt ?? oldNow) >= updatedAt,
+                       "task-only polling must publish a fresh observation time")
+                if age == 86_400 {
+                    expect(latest.map {
+                        oldContext.statistics.dayKey(for: $0.snapshot.statisticsIdentity.now)
+                            == oldContext.statistics.dayKey(for: Date())
+                    } == true, "task polling across midnight must update the published statistics day")
+                }
+            } catch {
+                failures.append("Kimi task polling fixture failed: \(error)")
+            }
+        }
+
         // A bounded page must keep visible live states working even when most
         // source records were not materialized. Only visible moves affect counts.
         do {
@@ -290,6 +346,120 @@ enum HomeStartupSelfTest {
                    "partial task pages must not double-count live IDs from unmaterialized records")
             expect(updated.columns.allSatisfy { $0.items.count <= 6 },
                    "live updates must preserve the six-card column limit")
+        }
+
+        // Cached Kimi summaries must not prevent the direct reader from refreshing
+        // totals and materializing details after the foreground deadline.
+        do {
+            let calls = SourceCounter()
+            var loaders = emptyLoaders()
+            loaders.restore = { _ in makeSnapshot(context: context, runtimes: [makeRuntime(.kimi, observedAt: context.now, tokens: 50)]) }
+            loaders.local = { scope, context in
+                let count = calls.next(scope: scope)
+                let value = makeRuntime(scope, observedAt: context.now, tokens: Int64(100 * count))
+                return RuntimeUsageSnapshot(scope: scope,
+                    snapshot: value.snapshot.replacingLocal(value.snapshot.local,
+                        messages: count == 1 ? ["Kimi Code 会话日志读取失败"] : []),
+                    status: value.status, quotaSourceLabel: value.quotaSourceLabel, usageSourceLabel: value.usageSourceLabel)
+            }
+            let coordinator = UsageRefreshCoordinator(loaders: loaders, foregroundDeadline: 0.02, historyDelay: 3)
+            var latest: HomePresentation?
+            coordinator.onChange = { latest = $0 }
+            coordinator.start(context: context)
+            defer { coordinator.stop() }
+            expect(waitUntil { status(latest, .kimi, .local)?.phase == .cached }, "Kimi fixture must restore a cached summary")
+            coordinator.resolveUnindexedLocalUsage(scopes: [.kimi], context: context)
+            expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.local?.todayTokens == 100 },
+                   "a restored Kimi summary must be replaced by a fresh local read")
+            expect(status(latest, .kimi, .local)?.hasDetails == true, "fresh Kimi data must enable history details")
+            expect(latest?.snapshot.runtime(for: .kimi)?.snapshot.messages.contains("Kimi Code 会话日志读取失败") == true,
+                   "local read diagnostics must reach the homepage")
+            coordinator.refresh(context: context)
+            expect(waitUntil { status(latest, .kimi, .local)?.phase == .cached }, "Kimi refresh must reach its foreground deadline")
+            coordinator.resolveUnindexedLocalUsage(scopes: [.kimi], context: context)
+            expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.local?.todayTokens == 200 },
+                   "Kimi local usage must refresh again after the deadline")
+            expect(latest?.snapshot.runtime(for: .kimi)?.snapshot.messages.contains("Kimi Code 会话日志读取失败") == false,
+                   "a recovered local read must clear its previous diagnostics")
+            coordinator.acceptHistoryFailure(.diskFull)
+            expect(status(latest, .kimi, .local)?.phase == .ready && status(latest, .kimi, .local)?.historyError == nil,
+                   "a Codex/Claude index failure must not invalidate independent Kimi data")
+        }
+
+        // Individually valid sources can still overflow the cross-runtime sum.
+        do {
+            let base = makeRuntime(.kimi, observedAt: context.now, tokens: 1).snapshot.local!
+            let edge = LocalUsage(lifetimeTokens: Int64.max, todayTokens: Int64.max,
+                sevenDayTokens: base.sevenDayTokens, threadCount: base.threadCount,
+                lastUpdatedAt: base.lastUpdatedAt, dailyBuckets: base.dailyBuckets, recentThreads: base.recentThreads,
+                detailedUsage: base.detailedUsage, usageTrend: base.usageTrend, inferencePerformance: base.inferencePerformance,
+                projectBoard: base.projectBoard, toolUsages: base.toolUsages, skillUsages: base.skillUsages)
+            let kimi = makeRuntime(.kimi, observedAt: context.now, tokens: 1)
+            let edgeRuntime = RuntimeUsageSnapshot(scope: .kimi, snapshot: kimi.snapshot.replacingLocal(edge),
+                status: kimi.status, quotaSourceLabel: kimi.quotaSourceLabel, usageSourceLabel: kimi.usageSourceLabel)
+            let aggregate = AgentUsageAggregator().aggregate([edgeRuntime, makeRuntime(.codex, observedAt: context.now, tokens: 1)], at: context.now)
+            expect(aggregate.local == nil && aggregate.messages.contains(where: { $0.contains("超出可表示范围") }),
+                   "overflow across valid runtimes must make the aggregate unavailable instead of crashing")
+            expect(edgeRuntime.snapshot.local?.lifetimeTokens == Int64.max,
+                   "an unavailable aggregate must not discard the per-runtime observation")
+            expect(makeSnapshot(context: context, runtimes: [edgeRuntime, makeRuntime(.codex, observedAt: context.now, tokens: 1)]).totalTodayTokens == nil,
+                   "the header total must not overflow independently of the aggregate")
+        }
+
+        // A known estimate must not conceal another runtime's unknown share.
+        do {
+            func runtime(_ scope: RuntimeScope, cost: Double?) -> RuntimeUsageSnapshot {
+                let project = ProjectUsage(id: "fixture", name: "Fixture", fullPath: "/fixture", tokens: 10,
+                    estimatedCostUSD: cost, threadCount: 1, lastActiveAt: context.now, sourceQuality: .detailed)
+                let local = LocalUsage(lifetimeTokens: 10, todayTokens: 10, sevenDayTokens: 10, threadCount: 1,
+                    lastUpdatedAt: context.now, dailyBuckets: [], recentThreads: [], detailedUsage: nil,
+                    usageTrend: nil, inferencePerformance: nil,
+                    projectBoard: ProjectBoard(recentProjects: [project], allProjects: [project]),
+                    toolUsages: [ToolUsage(id: "Bash", name: "Bash", category: "shell", callCount: 1,
+                        estimatedTokens: cost == nil ? nil : 10, estimatedCostUSD: cost)], skillUsages: [])
+                let base = makeRuntime(scope, observedAt: context.now, tokens: 1)
+                return RuntimeUsageSnapshot(scope: scope, snapshot: base.snapshot.replacingLocal(local),
+                    status: base.status, quotaSourceLabel: base.quotaSourceLabel, usageSourceLabel: base.usageSourceLabel)
+            }
+            for values in [[runtime(.codex, cost: 2), runtime(.kimi, cost: nil)],
+                           [runtime(.kimi, cost: nil), runtime(.codex, cost: 2)]] {
+                let merged = AgentUsageAggregator().aggregate(values, at: context.now).local
+                expect(merged?.projectBoard?.allProjects.first?.estimatedCostUSD == nil,
+                       "a mixed project must retain its unknown cost in either source order")
+                expect(merged?.toolUsages.first?.estimatedCostUSD == nil && merged?.toolUsages.first?.estimatedTokens == nil,
+                       "a mixed tool must retain its unknown estimates")
+                expect(merged?.projectBoard?.allProjects.first?.tokens == 20 && merged?.toolUsages.first?.callCount == 2,
+                       "missing estimates must not discard observed tokens or calls")
+            }
+            let priced = AgentUsageAggregator().aggregate([runtime(.codex, cost: 2), runtime(.claudeCode, cost: 3)], at: context.now).local
+            expect(priced?.projectBoard?.allProjects.first?.estimatedCostUSD == 5 && priced?.toolUsages.first?.estimatedCostUSD == 5,
+                   "fully priced projects and tools must continue to add their known estimates")
+        }
+
+        // A credential change must discard the old account's in-flight reply
+        // and read the new account without another manual refresh.
+        do {
+            let oldRequest = SourceGate()
+            var loaders = emptyLoaders()
+            loaders.quota = { scope, context in
+                guard scope == .kimi else { return nil }
+                if context.kimiAPIKey == "fixture-A" { oldRequest.wait() }
+                return makeRuntime(scope, observedAt: context.now, usedPercent: context.kimiAPIKey == "fixture-A" ? 20 : 80)
+            }
+            let coordinator = UsageRefreshCoordinator(loaders: loaders, foregroundDeadline: 0.1, historyDelay: 3)
+            var latest: HomePresentation?
+            coordinator.onChange = { latest = $0 }
+            func credentialContext(_ key: String) -> RuntimeLoadContext {
+                RuntimeLoadContext(now: context.now, homeDirectory: context.homeDirectory, cacheDirectory: context.cacheDirectory,
+                                   statistics: context.statistics, kimiAPIKey: key)
+            }
+            coordinator.start(context: credentialContext("fixture-A"))
+            defer { coordinator.stop(); oldRequest.release() }
+            expect(waitUntil { oldRequest.callCount > 0 }, "the old Kimi credential request must be in flight")
+            coordinator.refresh(context: credentialContext("fixture-B"))
+            oldRequest.release()
+            expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.fiveHourQuota?.usedPercent == 80 },
+                   "changing the Kimi key must discard the old account and publish the new account's quota")
         }
 
         if failures.isEmpty {

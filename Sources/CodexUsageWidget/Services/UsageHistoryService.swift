@@ -115,8 +115,16 @@ final class UsageHistoryService {
                 let leadershipInterval: TimeInterval = completeRuntimes == 2 ? 15 : 60
                 if completeRuntimes == 2, lastLeadership.map({ clock-$0 >= leadershipInterval }) ?? true {
                   lastLeadership = clock
+                  // Kimi has no fact projection, so its turn intervals are read
+                  // straight from the session logs and folded into the union.
+                  let kimiContext = RuntimeLoadContext(now: liveStatistics.now,
+                      homeDirectory: context.homeDirectory, cacheDirectory: context.cacheDirectory,
+                      statistics: liveStatistics)
+                  let kimiEvidence = KimiLeadershipReader().load(context: kimiContext)
+                  if let error = kimiEvidence.error { throw error }
                   if let leadership = try? store.withDeadline(milliseconds: 10000, {
-                       try store.indexedLeadership(root: root, statistics: liveStatistics)
+                       try store.indexedLeadership(root: root, statistics: liveStatistics,
+                           extraIntervals: kimiEvidence.intervals, extraProjectPaths: kimiEvidence.projectPaths)
                    }),
                    var summary = try store.archivePresentation(context: projectionContext, statistics: liveStatistics, runtime: runtime) {
                     summary.leadership = leadership

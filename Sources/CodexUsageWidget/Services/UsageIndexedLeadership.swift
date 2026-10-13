@@ -1,9 +1,21 @@
 import Foundation
 
+/// Kimi turn intervals enter the union from a direct log read rather than from
+/// the fact projection, so this bounds how many rows one call may add.
+private let maximumExtraLeadershipIntervals = 20_000
+
 extension UsageIndexStore {
     /// Disk-backed interval union and sweep. The returned object is bounded by 28 daily points
     /// and the visible project list, rather than by the number of historical turns.
-    func indexedLeadership(root: String, statistics: StatisticsContext) throws -> LeadershipDashboardSnapshot {
+    ///
+    /// `extraIntervals` carries runtimes the index does not materialize. They are
+    /// folded into the same raw union so every period query sweeps one timeline.
+    func indexedLeadership(
+        root: String,
+        statistics: StatisticsContext,
+        extraIntervals: [LeadershipInterval] = [],
+        extraProjectPaths: [String: String] = [:]
+    ) throws -> LeadershipDashboardSnapshot {
         let context = try ensureProjectionContext(root: root, statistics: statistics, now: statistics.now)
         let today = statistics.startOfDay(for: statistics.now)
         let start = statistics.calendar.date(byAdding: .day, value: -27, to: today)!
@@ -61,6 +73,7 @@ extension UsageIndexStore {
             """, [.real(cocoaOffset),.real(cocoaOffset),
                   .real(start.timeIntervalSince1970),.real(statistics.now.timeIntervalSince1970)])
         try execute("CREATE INDEX temp.leadership_raw_worker ON leadership_raw(worker,start,end)")
+        try appendExtraIntervals(extraIntervals, projectPaths: extraProjectPaths, windowStart: start, now: statistics.now)
         var reports: [LeadershipReport] = []
         for period in LeadershipPeriod.allCases {
             let windowStart = statistics.calendar.date(byAdding: .day, value: 1-period.dayCount, to: today)!
@@ -150,5 +163,40 @@ extension UsageIndexStore {
         let observed = try rows("SELECT min(observed_at_ms) FROM published_slice WHERE context_id=? AND domain='archive'", [.text(context)],limit:1).first?.first?.number
         return LeadershipDashboardSnapshot(modelVersion: LeadershipScoreModel.version,
             refreshedAt: observed.map { Date(timeIntervalSince1970:$0/1000) } ?? statistics.now, reports: reports)
+    }
+
+    /// Adds intervals from runtimes without a fact projection to the raw union.
+    /// Rows use the same columns the projection writes, so the merge, sweep and
+    /// project naming stay shared.
+    private func appendExtraIntervals(
+        _ intervals: [LeadershipInterval],
+        projectPaths: [String: String],
+        windowStart: Date,
+        now: Date
+    ) throws {
+        guard !intervals.isEmpty else { return }
+        let windowed = intervals.filter { $0.endAt > windowStart && $0.startAt < now }
+        guard windowed.count <= maximumExtraLeadershipIntervals else { throw UsageIndexError.resourceLimited }
+        try execute("DROP TABLE IF EXISTS temp.leadership_extra")
+        defer { try? execute("DROP TABLE IF EXISTS temp.leadership_extra") }
+        try execute("""
+            CREATE TEMP TABLE leadership_extra(id TEXT PRIMARY KEY,worker TEXT,kind TEXT,project TEXT,
+              start REAL,end REAL,confidence REAL,autonomous INTEGER,path TEXT)
+            """)
+        try transaction {
+            for interval in windowed {
+                try execute("INSERT OR REPLACE INTO leadership_extra VALUES (?,?,?,?,?,?,?,?,?)", [
+                    .text(interval.id), .text(interval.workerID), .text(interval.workerKind.rawValue),
+                    .text(interval.projectID), .real(interval.startAt.timeIntervalSince1970),
+                    .real(interval.endAt.timeIntervalSince1970), .real(interval.quality.confidence),
+                    .integer(interval.isAutonomous ? 1 : 0),
+                    .text(projectPaths[interval.projectID] ?? "")
+                ])
+            }
+        }
+        try execute("""
+            INSERT OR REPLACE INTO temp.leadership_raw
+            SELECT id,worker,kind,project,start,end,confidence,autonomous,path,1 FROM leadership_extra
+            """)
     }
 }
