@@ -66,6 +66,9 @@ test-home-startup: build
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-startup
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-snapshot
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-runtime-fast-sources
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-quota
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-local-usage
+	"$(MACOS_DIR)/$(APP_NAME)" --self-test-kimi-keychain
 	"$(MACOS_DIR)/$(APP_NAME)" --self-test-home-task-reader
 
 test-rate-limits:

@@ -100,7 +100,7 @@ codexU is distributed outside the Mac App Store. On first launch, macOS may bloc
 
 You can also right-click `CodexU.app` in Finder and choose **Open**, then confirm the same security prompt.
 
-codexU needs access to local Codex data under `~/.codex/`. When Claude Code stats are used, it also reads local transcripts, tasks, and status cache files under `~/.claude/`. If macOS asks for file or folder access, allow it so the widget can read local usage, threads, and automation metadata.
+codexU needs access to local Codex data under `~/.codex/`. When Claude Code stats are used, it also reads local transcripts, tasks, and status cache files under `~/.claude/`. When Kimi is enabled, it reads the local credential and session logs under `~/.kimi-code/`. If macOS asks for file or folder access, allow it so the widget can read local usage, threads, and automation metadata.
 
 ## Install
 
@@ -131,6 +131,9 @@ Run the installer and follow its setup wizard. Each installer has a matching `.s
 - A local Codex installation.
 - A signed-in Codex account for quota data.
 - Codex must have been used at least once so `~/.codex/state_5.sqlite` exists.
+- Kimi quota is optional. You can enter a Kimi Code platform `sk-kimi-xxx` API key in Settings (stored in the local Keychain; old preference entries are migrated and deleted). When no manual key is set, the credential is read from `~/.kimi-code/credentials/kimi-code.json`.
+- Kimi local token stats come from `~/.kimi-code/sessions/**/agents/*/wire.jsonl` and sum only `usage.record` events, deduplicated by model and session. `token_counting.*` events report a context watermark and are excluded. This covers only sessions produced on this Mac, so it is a traceable lower bound.
+- Kimi logs provide no cost basis, so costs show `--` and charts offer tokens only. Failed log reads show an incomplete-statistics warning and are retried on the next refresh.
 - Claude Code support is optional. Historical tokens come from `~/.claude/projects/**/*.jsonl`; quota requires a local statusLine snapshot cache.
 - Xcode Command Line Tools for building from source.
 
@@ -204,6 +207,12 @@ For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md
 - Claude Code historical tokens: assistant `message.usage` fields in `~/.claude/projects/**/*.jsonl`.
 - Claude Code tools, Skills, and tasks: transcript `tool_use.name` / explicit Skill attribution, plus `~/.claude/tasks/**/*.json`. When a Skill path is absent, codexU infers it from Claude Code's current personal, project, nested, plugin, and legacy-command locations; unresolved history is shown as “not located.”
 - Claude Code active quota: optional `~/Library/Caches/codexU/claude-code/statusline-snapshot.json`; without it, 5-hour and 7-day quota show `--`.
+- Kimi official quota: reads the Kimi Coding Plan `GET {base}/usages` endpoint (default `https://api.kimi.com/coding/v1`) and maps the 5-hour, 7-day, and monthly windows. The credential comes from the local `~/.kimi-code/credentials/kimi-code.json` (refreshed with its refresh token when expired; refreshed tokens stay in memory and are never written back to Kimi Code's file) or from a key entered in Settings. Windows the API omits stay hidden, and a failed read keeps the last successful value marked as stale.
+- Kimi local tokens: `usage.record` events in `~/.kimi-code/sessions/**/agents/*/wire.jsonl`, summing `inputOther` (cache miss), `inputCacheRead` (cache hit), `inputCacheCreation` (cache write), and `output`. Every provider routed through the Kimi Code CLI counts, broken down by model. Cache reads dominate long sessions and can exceed ninety percent of the total.
+- Kimi project ranking: attributed to a working directory through the session's `state.json` `cwd`. Sessions without a recorded cwd still count toward the totals but are not presented as a project.
+- Kimi tools and Skills: `tool.call` events from the same session logs; `Skill` calls are grouped by `args.skill` into the Skill stats (not double-counted as tools). Token estimates come from SKILL.md files resolvable on the current filesystem; unresolved Skills show no estimate rather than a fabricated one.
+- Kimi inference performance: pairs local `llm.request` with `usage.record` to derive per-call durations, grouped by model × thinking effort with call counts, mean, p50/p90, and effective output speed. Comparable only on this device; not meant for cross-device or cross-version ranking.
+- Kimi usage trends and project thread counts: per-model 180-day buckets with 7-day ordering; project thread counts are deduplicated by contributing session file.
 - Update checks: default access to the GitHub Releases API for public `shanggqm/codexU` release metadata, cached in `~/Library/Caches/codexU/update-check.json`.
 
 Current Codex quota APIs expose rolling-window percentages and reset times, not absolute account quota sizes. Claude Code support reads local history and an optional active snapshot; it is not a Claude.ai official billing view. See [RESEARCH.md](RESEARCH.md) for the data model and fallback behavior.

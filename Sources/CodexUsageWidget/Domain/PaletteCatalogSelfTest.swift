@@ -90,7 +90,7 @@ enum PaletteCatalogSelfTest {
         if let defaults = UserDefaults(suiteName: suiteName) {
             defer { defaults.removePersistentDomain(forName: suiteName) }
             defaults.set("community.missing", forKey: "codexU.paletteID")
-            let normalized = AppSettings(defaults: defaults, paletteCatalog: catalog)
+            let normalized = AppSettings(defaults: defaults, paletteCatalog: catalog, kimiKeyStore: KimiAPIKeyStore(service: suiteName))
             expect(normalized.paletteID == PaletteCatalog.defaultPaletteID, "invalid stored ID should normalize to default")
             expect(normalized.paletteFallbackNotice != nil, "invalid stored ID should expose a fallback notice")
             expect(normalized.selectPalette("codexu.blue-white-porcelain") == .selected, "valid selection should succeed")

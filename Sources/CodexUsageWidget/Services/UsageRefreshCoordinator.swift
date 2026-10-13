@@ -41,6 +41,9 @@ final class UsageRefreshCoordinator {
     private var inFlight = Set<HomeDataKey>()
     private var fastRequestID: UInt64 = 0
     private var fastRequests: [HomeDataKey: UInt64] = [:]
+    private var kimiCredentialGeneration: UInt64 = 0
+    private var unindexedInFlight = Set<RuntimeScope>()
+    private var localMessages: [RuntimeScope: [String]] = [:]
     private var historyRunning = false
     private var historyRequested = false
     private var watchdog: DispatchWorkItem?
@@ -90,6 +93,15 @@ final class UsageRefreshCoordinator {
         let previous = self.context
         let changed = previous.map { !sameStatistics($0, context) } ?? false
         self.context = context
+        if let previous, (previous.kimiAPIKey != context.kimiAPIKey || previous.kimiCredentialError != context.kimiCredentialError) {
+            kimiCredentialGeneration &+= 1
+            if let old = runtimes[.kimi] {
+                runtimes[.kimi] = RuntimeUsageSnapshot(scope: .kimi,
+                    snapshot: UsageSnapshot.empty.replacingLocal(old.snapshot.local).replacingTaskBoard(old.snapshot.taskBoard),
+                    status: .localOnly, quotaSourceLabel: "", usageSourceLabel: old.usageSourceLabel)
+            }
+            statuses[.init(scope: .kimi, kind: .quota)] = HomeLoadStatus()
+        }
         if changed {
             epoch &+= 1
             for scope in RuntimeScope.allCases {
@@ -152,8 +164,10 @@ final class UsageRefreshCoordinator {
         fastRequests[key] = requestID
         statuses[key, default: HomeLoadStatus()].begin()
         let requestEpoch = epoch
+        let credentialGeneration = kimiCredentialGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + foregroundDeadline) { [weak self] in
             guard let self, self.active, self.epoch == requestEpoch,
+                  scope != .kimi || kind != .quota || credentialGeneration == self.kimiCredentialGeneration,
                   self.fastRequests[key] == requestID, self.inFlight.contains(key) else { return }
             self.statuses[key]?.finish(at: nil)
             self.publish()
@@ -166,7 +180,8 @@ final class UsageRefreshCoordinator {
                 guard let self else { return }
                 self.inFlight.remove(key)
                 guard self.active else { return }
-                guard requestEpoch == self.epoch else {
+                guard requestEpoch == self.epoch,
+                      scope != .kimi || kind != .quota || credentialGeneration == self.kimiCredentialGeneration else {
                     self.launchFast(scope: scope, kind: kind)
                     return
                 }
@@ -194,7 +209,7 @@ final class UsageRefreshCoordinator {
             monthlyQuota: next.snapshot.monthlyQuota, credits: next.snapshot.credits,
             cloudLifetimeTokens: next.snapshot.cloudLifetimeTokens,
             local: old?.snapshot.local, taskBoard: old?.snapshot.taskBoard,
-            messages: next.snapshot.messages
+            messages: next.snapshot.messages + (localMessages[scope] ?? [])
         )
         runtimes[scope] = RuntimeUsageSnapshot(
             scope: scope, snapshot: value,
@@ -226,7 +241,7 @@ final class UsageRefreshCoordinator {
 
     // Only complete archive cuts may replace last-known complete display data.
     func acceptHistoryFailure(_ error: UsageIndexError) {
-        let keys = RuntimeScope.allCases.map { HomeDataKey(scope: $0, kind: .local) }
+        let keys = RuntimeScope.historyIndexedScopes.map { HomeDataKey(scope: $0, kind: .local) }
             + [HomeDataKey(scope: nil, kind: .leadership)]
         guard keys.contains(where: { statuses[$0]?.historyError != error }) else { return }
         for key in keys {
@@ -258,6 +273,62 @@ final class UsageRefreshCoordinator {
         publish(save: true)
     }
 
+    /// Resolves local usage for runtimes the history index does not cover.
+    ///
+    /// The index publishes archives for its own runtimes only, so a runtime
+    /// without an archive would otherwise sit in `.background` forever and read
+    /// as "history is being prepared". Those runtimes read their own local
+    /// source directly instead.
+    func resolveUnindexedLocalUsage(scopes: [RuntimeScope], context: RuntimeLoadContext) {
+        guard active, !scopes.isEmpty else { return }
+        let loaders = loaders
+        let requestEpoch = epoch
+        for scope in scopes {
+            // Display readiness does not imply freshness. Keep each reader
+            // single-flight while allowing cached and ready data to refresh.
+            guard unindexedInFlight.insert(scope).inserted else { continue }
+            historyQueue.async { [weak self] in
+                let local = loaders.local(scope, context)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.unindexedInFlight.remove(scope)
+                    guard self.active else { return }
+                    guard self.epoch == requestEpoch else {
+                        if let current = self.context {
+                            self.resolveUnindexedLocalUsage(scopes: [scope], context: current)
+                        }
+                        return
+                    }
+                    let key = HomeDataKey(scope: scope, kind: .local)
+                    self.acceptDirectLocal(local, scope: scope)
+                    if let local, local.snapshot.local != nil {
+                        self.statuses[key] = HomeLoadStatus(
+                            phase: .ready,
+                            observedAt: local.snapshot.refreshedAt,
+                            hasDetails: true
+                        )
+                    } else {
+                        self.statuses[key]?.finish(at: nil)
+                    }
+                    self.publish(save: true)
+                }
+            }
+        }
+    }
+
+    private func acceptDirectLocal(_ next: RuntimeUsageSnapshot?, scope: RuntimeScope) {
+        guard let next else { return }
+        let old = runtimes[scope] ?? emptyRuntime(scope)
+        let previousMessages = Set(localMessages[scope] ?? [])
+        localMessages[scope] = next.snapshot.messages
+        let merged = old.snapshot.replacingLocal(next.snapshot.local ?? old.snapshot.local,
+            observedAt: next.snapshot.local == nil ? nil : next.snapshot.refreshedAt,
+            messages: old.snapshot.messages.filter { !previousMessages.contains($0) } + next.snapshot.messages)
+        runtimes[scope] = RuntimeUsageSnapshot(scope: scope, snapshot: merged,
+            status: merged.quotaReadSucceeded ? old.status : (merged.local == nil ? old.status : .localOnly),
+            quotaSourceLabel: old.quotaSourceLabel, usageSourceLabel: next.usageSourceLabel)
+    }
+
     private func startHistory() {
         guard active, let context, !historyRunning else { return }
         if loaders.usesHistoryIndex {
@@ -274,6 +345,10 @@ final class UsageRefreshCoordinator {
                     self.acceptHistoryArchive(result)
                 }
             }
+            // The index only ever publishes archives for its own runtimes, so
+            // pull the uncovered ones in directly instead of leaving them in a
+            // permanently "preparing history" state.
+            resolveUnindexedLocalUsage(scopes: RuntimeScope.historyUnindexedScopes, context: context)
             return
         }
         historyRunning = true
@@ -286,14 +361,8 @@ final class UsageRefreshCoordinator {
                 DispatchQueue.main.async {
                     guard let self, self.active, self.epoch == requestEpoch else { return }
                     let key = HomeDataKey(scope: scope, kind: .local)
-                    if let local, let value = local.snapshot.local {
-                        let old = self.runtimes[scope] ?? self.emptyRuntime(scope)
-                        let merged = old.snapshot.replacingLocal(value, observedAt: local.snapshot.refreshedAt)
-                        self.runtimes[scope] = RuntimeUsageSnapshot(
-                            scope: scope, snapshot: merged,
-                            status: merged.quotaReadSucceeded ? old.status : .localOnly,
-                            quotaSourceLabel: old.quotaSourceLabel, usageSourceLabel: local.usageSourceLabel
-                        )
+                    self.acceptDirectLocal(local, scope: scope)
+                    if let local, local.snapshot.local != nil {
                         self.statuses[key, default: HomeLoadStatus()].hasDetails = true
                     }
                     self.statuses[key, default: HomeLoadStatus()].finish(

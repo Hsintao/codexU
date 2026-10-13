@@ -4,8 +4,11 @@ struct AgentUsageAggregator {
     func aggregate(_ runtimes: [RuntimeUsageSnapshot], at refreshedAt: Date) -> UsageSnapshot {
         let locals = runtimes.compactMap { $0.snapshot.local }
         let local = aggregateLocalUsage(locals)
-        let messages = runtimes.flatMap { runtime in
+        var messages = runtimes.flatMap { runtime in
             runtime.snapshot.messages.map { "\(runtime.displayName): \($0)" }
+        }
+        if !locals.isEmpty, local == nil {
+            messages.append("Runtime 合计 token 超出可表示范围，合计统计暂不可用")
         }
 
         return UsageSnapshot(
@@ -28,10 +31,21 @@ struct AgentUsageAggregator {
     private func aggregateLocalUsage(_ locals: [LocalUsage]) -> LocalUsage? {
         guard !locals.isEmpty else { return nil }
 
-        let lifetimeTokens = locals.reduce(Int64(0)) { $0 + $1.lifetimeTokens }
-        let todayTokens = locals.reduce(Int64(0)) { $0 + $1.todayTokens }
-        let sevenDayTokens = locals.reduce(Int64(0)) { $0 + $1.sevenDayTokens }
-        let threadCount = locals.reduce(0) { $0 + $1.threadCount }
+        var lifetimeTokens: Int64 = 0
+        var todayTokens: Int64 = 0
+        var sevenDayTokens: Int64 = 0
+        var threadCount = 0
+        for local in locals {
+            let lifetime = lifetimeTokens.addingReportingOverflow(local.lifetimeTokens)
+            let today = todayTokens.addingReportingOverflow(local.todayTokens)
+            let sevenDay = sevenDayTokens.addingReportingOverflow(local.sevenDayTokens)
+            let threads = threadCount.addingReportingOverflow(local.threadCount)
+            guard !lifetime.overflow, !today.overflow, !sevenDay.overflow, !threads.overflow else { return nil }
+            lifetimeTokens = lifetime.partialValue
+            todayTokens = today.partialValue
+            sevenDayTokens = sevenDay.partialValue
+            threadCount = threads.partialValue
+        }
         let lastUpdatedAt = locals.compactMap(\.lastUpdatedAt).max()
         let dailyBuckets = aggregateDailyBuckets(locals.flatMap(\.dailyBuckets))
         let detailedUsage = aggregateDetailedUsage(locals.compactMap(\.detailedUsage))
@@ -81,10 +95,10 @@ struct AgentUsageAggregator {
         var tokenEventCount = 0
 
         for value in values {
-            today.add(tokens: value.today.tokens, costUSD: value.today.estimatedCostUSD, usesReferencePricing: value.today.usesReferencePricing)
-            sevenDay.add(tokens: value.sevenDay.tokens, costUSD: value.sevenDay.estimatedCostUSD, usesReferencePricing: value.sevenDay.usesReferencePricing)
-            month.add(tokens: value.month.tokens, costUSD: value.month.estimatedCostUSD, usesReferencePricing: value.month.usesReferencePricing)
-            lifetime.add(tokens: value.lifetime.tokens, costUSD: value.lifetime.estimatedCostUSD, usesReferencePricing: value.lifetime.usesReferencePricing)
+            today.add(tokens: value.today.tokens, costUSD: value.today.estimatedCostUSD, usesReferencePricing: value.today.usesReferencePricing, hasEstimatedCost: value.today.hasEstimatedCost)
+            sevenDay.add(tokens: value.sevenDay.tokens, costUSD: value.sevenDay.estimatedCostUSD, usesReferencePricing: value.sevenDay.usesReferencePricing, hasEstimatedCost: value.sevenDay.hasEstimatedCost)
+            month.add(tokens: value.month.tokens, costUSD: value.month.estimatedCostUSD, usesReferencePricing: value.month.usesReferencePricing, hasEstimatedCost: value.month.hasEstimatedCost)
+            lifetime.add(tokens: value.lifetime.tokens, costUSD: value.lifetime.estimatedCostUSD, usesReferencePricing: value.lifetime.usesReferencePricing, hasEstimatedCost: value.lifetime.hasEstimatedCost)
             parsedFileCount += value.parsedFileCount
             tokenEventCount += value.tokenEventCount
         }
@@ -167,7 +181,9 @@ private struct AggregatedProject {
     let name: String
     let fullPath: String
     var tokens: Int64 = 0
-    var estimatedCostUSD: Double?
+    private var knownCostUSD: Double = 0
+    private var hasEstimatedCost = true
+    var estimatedCostUSD: Double? { hasEstimatedCost ? knownCostUSD : nil }
     var threadCount: Int = 0
     var lastActiveAt: Date?
     var sourceQuality: UsageSourceQuality = .detailed
@@ -180,7 +196,11 @@ private struct AggregatedProject {
 
     mutating func add(_ project: ProjectUsage) {
         tokens += project.tokens
-        estimatedCostUSD = addOptional(estimatedCostUSD, project.estimatedCostUSD)
+        if let cost = project.estimatedCostUSD {
+            knownCostUSD += cost
+        } else {
+            hasEstimatedCost = false
+        }
         threadCount += project.threadCount
         lastActiveAt = maxDate(lastActiveAt, project.lastActiveAt)
         if project.sourceQuality == .approximate {
@@ -203,29 +223,14 @@ private struct AggregatedProject {
 }
 
 private func addOptional(_ lhs: Int64?, _ rhs: Int64?) -> Int64? {
-    switch (lhs, rhs) {
-    case let (left?, right?):
-        return left + right
-    case let (left?, nil):
-        return left
-    case let (nil, right?):
-        return right
-    case (nil, nil):
-        return nil
-    }
+    guard let lhs, let rhs else { return nil }
+    let sum = lhs.addingReportingOverflow(rhs)
+    return sum.overflow ? nil : sum.partialValue
 }
 
 private func addOptional(_ lhs: Double?, _ rhs: Double?) -> Double? {
-    switch (lhs, rhs) {
-    case let (left?, right?):
-        return left + right
-    case let (left?, nil):
-        return left
-    case let (nil, right?):
-        return right
-    case (nil, nil):
-        return nil
-    }
+    guard let lhs, let rhs else { return nil }
+    return lhs + rhs
 }
 
 private func maxDate(_ lhs: Date?, _ rhs: Date?) -> Date? {

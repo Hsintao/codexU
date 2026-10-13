@@ -292,6 +292,120 @@ enum HomeStartupSelfTest {
                    "live updates must preserve the six-card column limit")
         }
 
+        // Cached Kimi summaries must not prevent the direct reader from refreshing
+        // totals and materializing details after the foreground deadline.
+        do {
+            let calls = SourceCounter()
+            var loaders = emptyLoaders()
+            loaders.restore = { _ in makeSnapshot(context: context, runtimes: [makeRuntime(.kimi, observedAt: context.now, tokens: 50)]) }
+            loaders.local = { scope, context in
+                let count = calls.next(scope: scope)
+                let value = makeRuntime(scope, observedAt: context.now, tokens: Int64(100 * count))
+                return RuntimeUsageSnapshot(scope: scope,
+                    snapshot: value.snapshot.replacingLocal(value.snapshot.local,
+                        messages: count == 1 ? ["Kimi Code 会话日志读取失败"] : []),
+                    status: value.status, quotaSourceLabel: value.quotaSourceLabel, usageSourceLabel: value.usageSourceLabel)
+            }
+            let coordinator = UsageRefreshCoordinator(loaders: loaders, foregroundDeadline: 0.02, historyDelay: 3)
+            var latest: HomePresentation?
+            coordinator.onChange = { latest = $0 }
+            coordinator.start(context: context)
+            defer { coordinator.stop() }
+            expect(waitUntil { status(latest, .kimi, .local)?.phase == .cached }, "Kimi fixture must restore a cached summary")
+            coordinator.resolveUnindexedLocalUsage(scopes: [.kimi], context: context)
+            expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.local?.todayTokens == 100 },
+                   "a restored Kimi summary must be replaced by a fresh local read")
+            expect(status(latest, .kimi, .local)?.hasDetails == true, "fresh Kimi data must enable history details")
+            expect(latest?.snapshot.runtime(for: .kimi)?.snapshot.messages.contains("Kimi Code 会话日志读取失败") == true,
+                   "local read diagnostics must reach the homepage")
+            coordinator.refresh(context: context)
+            expect(waitUntil { status(latest, .kimi, .local)?.phase == .cached }, "Kimi refresh must reach its foreground deadline")
+            coordinator.resolveUnindexedLocalUsage(scopes: [.kimi], context: context)
+            expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.local?.todayTokens == 200 },
+                   "Kimi local usage must refresh again after the deadline")
+            expect(latest?.snapshot.runtime(for: .kimi)?.snapshot.messages.contains("Kimi Code 会话日志读取失败") == false,
+                   "a recovered local read must clear its previous diagnostics")
+            coordinator.acceptHistoryFailure(.diskFull)
+            expect(status(latest, .kimi, .local)?.phase == .ready && status(latest, .kimi, .local)?.historyError == nil,
+                   "a Codex/Claude index failure must not invalidate independent Kimi data")
+        }
+
+        // Individually valid sources can still overflow the cross-runtime sum.
+        do {
+            let base = makeRuntime(.kimi, observedAt: context.now, tokens: 1).snapshot.local!
+            let edge = LocalUsage(lifetimeTokens: Int64.max, todayTokens: Int64.max,
+                sevenDayTokens: base.sevenDayTokens, threadCount: base.threadCount,
+                lastUpdatedAt: base.lastUpdatedAt, dailyBuckets: base.dailyBuckets, recentThreads: base.recentThreads,
+                detailedUsage: base.detailedUsage, usageTrend: base.usageTrend, inferencePerformance: base.inferencePerformance,
+                projectBoard: base.projectBoard, toolUsages: base.toolUsages, skillUsages: base.skillUsages)
+            let kimi = makeRuntime(.kimi, observedAt: context.now, tokens: 1)
+            let edgeRuntime = RuntimeUsageSnapshot(scope: .kimi, snapshot: kimi.snapshot.replacingLocal(edge),
+                status: kimi.status, quotaSourceLabel: kimi.quotaSourceLabel, usageSourceLabel: kimi.usageSourceLabel)
+            let aggregate = AgentUsageAggregator().aggregate([edgeRuntime, makeRuntime(.codex, observedAt: context.now, tokens: 1)], at: context.now)
+            expect(aggregate.local == nil && aggregate.messages.contains(where: { $0.contains("超出可表示范围") }),
+                   "overflow across valid runtimes must make the aggregate unavailable instead of crashing")
+            expect(edgeRuntime.snapshot.local?.lifetimeTokens == Int64.max,
+                   "an unavailable aggregate must not discard the per-runtime observation")
+            expect(makeSnapshot(context: context, runtimes: [edgeRuntime, makeRuntime(.codex, observedAt: context.now, tokens: 1)]).totalTodayTokens == nil,
+                   "the header total must not overflow independently of the aggregate")
+        }
+
+        // A known estimate must not conceal another runtime's unknown share.
+        do {
+            func runtime(_ scope: RuntimeScope, cost: Double?) -> RuntimeUsageSnapshot {
+                let project = ProjectUsage(id: "fixture", name: "Fixture", fullPath: "/fixture", tokens: 10,
+                    estimatedCostUSD: cost, threadCount: 1, lastActiveAt: context.now, sourceQuality: .detailed)
+                let local = LocalUsage(lifetimeTokens: 10, todayTokens: 10, sevenDayTokens: 10, threadCount: 1,
+                    lastUpdatedAt: context.now, dailyBuckets: [], recentThreads: [], detailedUsage: nil,
+                    usageTrend: nil, inferencePerformance: nil,
+                    projectBoard: ProjectBoard(recentProjects: [project], allProjects: [project]),
+                    toolUsages: [ToolUsage(id: "Bash", name: "Bash", category: "shell", callCount: 1,
+                        estimatedTokens: cost == nil ? nil : 10, estimatedCostUSD: cost)], skillUsages: [])
+                let base = makeRuntime(scope, observedAt: context.now, tokens: 1)
+                return RuntimeUsageSnapshot(scope: scope, snapshot: base.snapshot.replacingLocal(local),
+                    status: base.status, quotaSourceLabel: base.quotaSourceLabel, usageSourceLabel: base.usageSourceLabel)
+            }
+            for values in [[runtime(.codex, cost: 2), runtime(.kimi, cost: nil)],
+                           [runtime(.kimi, cost: nil), runtime(.codex, cost: 2)]] {
+                let merged = AgentUsageAggregator().aggregate(values, at: context.now).local
+                expect(merged?.projectBoard?.allProjects.first?.estimatedCostUSD == nil,
+                       "a mixed project must retain its unknown cost in either source order")
+                expect(merged?.toolUsages.first?.estimatedCostUSD == nil && merged?.toolUsages.first?.estimatedTokens == nil,
+                       "a mixed tool must retain its unknown estimates")
+                expect(merged?.projectBoard?.allProjects.first?.tokens == 20 && merged?.toolUsages.first?.callCount == 2,
+                       "missing estimates must not discard observed tokens or calls")
+            }
+            let priced = AgentUsageAggregator().aggregate([runtime(.codex, cost: 2), runtime(.claudeCode, cost: 3)], at: context.now).local
+            expect(priced?.projectBoard?.allProjects.first?.estimatedCostUSD == 5 && priced?.toolUsages.first?.estimatedCostUSD == 5,
+                   "fully priced projects and tools must continue to add their known estimates")
+        }
+
+        // A credential change must discard the old account's in-flight reply
+        // and read the new account without another manual refresh.
+        do {
+            let oldRequest = SourceGate()
+            var loaders = emptyLoaders()
+            loaders.quota = { scope, context in
+                guard scope == .kimi else { return nil }
+                if context.kimiAPIKey == "fixture-A" { oldRequest.wait() }
+                return makeRuntime(scope, observedAt: context.now, usedPercent: context.kimiAPIKey == "fixture-A" ? 20 : 80)
+            }
+            let coordinator = UsageRefreshCoordinator(loaders: loaders, foregroundDeadline: 0.1, historyDelay: 3)
+            var latest: HomePresentation?
+            coordinator.onChange = { latest = $0 }
+            func credentialContext(_ key: String) -> RuntimeLoadContext {
+                RuntimeLoadContext(now: context.now, homeDirectory: context.homeDirectory, cacheDirectory: context.cacheDirectory,
+                                   statistics: context.statistics, kimiAPIKey: key)
+            }
+            coordinator.start(context: credentialContext("fixture-A"))
+            defer { coordinator.stop(); oldRequest.release() }
+            expect(waitUntil { oldRequest.callCount > 0 }, "the old Kimi credential request must be in flight")
+            coordinator.refresh(context: credentialContext("fixture-B"))
+            oldRequest.release()
+            expect(waitUntil { latest?.snapshot.runtime(for: .kimi)?.snapshot.fiveHourQuota?.usedPercent == 80 },
+                   "changing the Kimi key must discard the old account and publish the new account's quota")
+        }
+
         if failures.isEmpty {
             print("Home startup self-test passed: bounded foreground waiting, real cache restore, independent data, late replies, timezone, tasks")
             return true

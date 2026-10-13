@@ -170,11 +170,27 @@ struct PricedTokenUsage: Equatable, Codable {
     var tokens: TokenBreakdown
     var estimatedCostUSD: Double
     var usesReferencePricing: Bool
+    var hasEstimatedCost: Bool
 
-    init(tokens: TokenBreakdown, estimatedCostUSD: Double, usesReferencePricing: Bool = false) {
+    var estimatedCostForDisplay: Double? { hasEstimatedCost ? estimatedCostUSD : nil }
+
+    init(tokens: TokenBreakdown, estimatedCostUSD: Double, usesReferencePricing: Bool = false, hasEstimatedCost: Bool = true) {
         self.tokens = tokens
         self.estimatedCostUSD = estimatedCostUSD
         self.usesReferencePricing = usesReferencePricing
+        self.hasEstimatedCost = hasEstimatedCost
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tokens, estimatedCostUSD, usesReferencePricing, hasEstimatedCost
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try values.decode(TokenBreakdown.self, forKey: .tokens)
+        estimatedCostUSD = try values.decode(Double.self, forKey: .estimatedCostUSD)
+        usesReferencePricing = try values.decode(Bool.self, forKey: .usesReferencePricing)
+        hasEstimatedCost = try values.decodeIfPresent(Bool.self, forKey: .hasEstimatedCost) ?? true
     }
 
     static let zero = PricedTokenUsage(tokens: .zero, estimatedCostUSD: 0, usesReferencePricing: false)
@@ -182,11 +198,13 @@ struct PricedTokenUsage: Equatable, Codable {
     mutating func add(
         tokens addedTokens: TokenBreakdown,
         costUSD: Double,
-        usesReferencePricing addedUsesReferencePricing: Bool = false
+        usesReferencePricing addedUsesReferencePricing: Bool = false,
+        hasEstimatedCost addedHasEstimatedCost: Bool = true
     ) {
         tokens.add(addedTokens)
         estimatedCostUSD += costUSD
         usesReferencePricing = usesReferencePricing || addedUsesReferencePricing
+        hasEstimatedCost = hasEstimatedCost && addedHasEstimatedCost
     }
 }
 
@@ -729,6 +747,10 @@ final class UsageStore: ObservableObject {
     @Published var isRefreshing = false
     @Published private(set) var homeStatuses: [HomeDataKey: HomeLoadStatus] = [:]
     @Published private(set) var statisticsPreference = StatisticsTimeZonePreferenceStore.load()
+    /// Mirrors the Kimi credential from settings so refreshes can pass it into
+    /// the runtime load context without reaching into the settings object.
+    private(set) var kimiAPIKey = ""
+    private var kimiCredentialError: String?
     @Published private(set) var statisticsTransitionMessage: String?
     @Published private(set) var isSwitchingStatisticsTimeZone = false
     @Published private(set) var visualEnergyMode: VisualEnergyMode = .suspended
@@ -780,20 +802,24 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    var totalTodayTokens: Int64 {
+    var totalTodayTokens: Int64? {
         multiRuntimeSnapshot.totalTodayTokens
     }
 
-    func totalTodayTokens(for scopes: [RuntimeScope]) -> Int64 {
-        scopes.reduce(Int64(0)) { total, scope in
-            total + (runtimeSnapshot(for: scope)?.todayTokens ?? 0)
+    func totalTodayTokens(for scopes: [RuntimeScope]) -> Int64? {
+        var total: Int64 = 0
+        for scope in scopes {
+            let sum = total.addingReportingOverflow(runtimeSnapshot(for: scope)?.todayTokens ?? 0)
+            guard !sum.overflow else { return nil }
+            total = sum.partialValue
         }
+        return total
     }
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        homeCoordinator.start(context: RuntimeLoadContext.live(statisticsPreference: statisticsPreference))
+        homeCoordinator.start(context: RuntimeLoadContext.live(statisticsPreference: statisticsPreference, kimiAPIKey: kimiAPIKey, kimiCredentialError: kimiCredentialError))
         lastFullRefreshCompletedAt = Date()
         codexTaskClient.start(reason: .startup)
         systemTimeZoneObserver = NotificationCenter.default.addObserver(
@@ -859,7 +885,7 @@ final class UsageStore: ObservableObject {
 
     func refresh(queueIfBusy: Bool = false) {
         guard hasStarted else { return }
-        homeCoordinator.refresh(context: RuntimeLoadContext.live(statisticsPreference: statisticsPreference))
+        homeCoordinator.refresh(context: RuntimeLoadContext.live(statisticsPreference: statisticsPreference, kimiAPIKey: kimiAPIKey, kimiCredentialError: kimiCredentialError))
         lastFullRefreshCompletedAt = Date()
         scheduleFullRefreshTimer()
     }
@@ -970,6 +996,16 @@ final class UsageStore: ObservableObject {
         if !visibleRuntimeScopes.contains(selectedRuntimeScope) {
             selectRuntime(visibleRuntimeScopes.first ?? selectedRuntimeScope)
         }
+    }
+
+    /// Adopts a Kimi credential change and refreshes so the new credential is
+    /// used on the next Kimi quota read.
+    func updateKimiAPIKey(_ value: String, readError: String? = nil) {
+        guard value != kimiAPIKey || readError != kimiCredentialError else { return }
+        kimiAPIKey = value
+        kimiCredentialError = readError
+        guard hasStarted else { return }
+        refresh(queueIfBusy: true)
     }
 
     func setMainWindowActive(_ isActive: Bool) {
@@ -4142,6 +4178,7 @@ final class AppSettings: ObservableObject {
     private static let paletteIDKey = "codexU.paletteID"
 
     private let defaults: UserDefaults
+    private let kimiKeyStore: KimiAPIKeyStore
     let paletteCatalog: PaletteCatalog
 
     @Published var language: WidgetLanguage {
@@ -4206,14 +4243,21 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Optional Kimi Coding Plan API key. When empty the Kimi runtime falls back
+    /// to the locally stored Kimi Code credential. Stored in the local Keychain.
+    @Published private(set) var kimiAPIKey: String
+    @Published private(set) var kimiAPIKeyError: String?
+
     @Published private(set) var statusItemPreferences: StatusItemPreferences
     @Published private(set) var globalShortcut: GlobalShortcut?
     @Published private(set) var globalShortcutError: GlobalShortcutError?
     var globalShortcutRegistration: ((GlobalShortcut) -> Result<Void, GlobalShortcutRegistrationFailure>)?
     var globalShortcutUnregistration: (() -> Result<Void, GlobalShortcutRegistrationFailure>)?
 
-    init(defaults: UserDefaults = .standard, paletteCatalog: PaletteCatalog = .loadFromMainBundle()) {
+    init(defaults: UserDefaults = .standard, paletteCatalog: PaletteCatalog = .loadFromMainBundle(),
+         kimiKeyStore: KimiAPIKeyStore = KimiAPIKeyStore()) {
         self.defaults = defaults
+        self.kimiKeyStore = kimiKeyStore
         self.paletteCatalog = paletteCatalog
         let storedPaletteID = defaults.string(forKey: Self.paletteIDKey)
         if let storedPaletteID, paletteCatalog.contains(storedPaletteID) {
@@ -4241,6 +4285,13 @@ final class AppSettings: ObservableObject {
         }
         skippedUpdateVersion = defaults.string(forKey: Self.skippedUpdateVersionKey)
         visibleRuntimeScopes = Self.storedVisibleRuntimeScopes(defaults: defaults)
+        do {
+            kimiAPIKey = try kimiKeyStore.loadMigrating(defaults: defaults) ?? ""
+            kimiAPIKeyError = nil
+        } catch {
+            kimiAPIKey = ""
+            kimiAPIKeyError = (error as? KimiAPIKeyStore.Failure)?.message ?? "Kimi Keychain 读取失败"
+        }
         statusItemPreferences = StatusItemPreferencesStore.load(defaults: defaults)
         let storedShortcut = GlobalShortcut.load(defaults: defaults)
         if let storedShortcut, storedShortcut.validationError != nil {
@@ -4283,6 +4334,21 @@ final class AppSettings: ObservableObject {
         }
         visibleRuntimeScopes = visibleRuntimeScopes.filter { $0 != scope }
         return true
+    }
+
+    /// Stores the manually entered Kimi API key. Surrounding whitespace is
+    /// trimmed so a pasted key cannot silently break authentication.
+    func setKimiAPIKey(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != kimiAPIKey || kimiAPIKeyError != nil else { return }
+        do {
+            try kimiKeyStore.write(trimmed)
+            defaults.removeObject(forKey: KimiAPIKeyStore.legacyDefaultsKey)
+            kimiAPIKeyError = nil
+            kimiAPIKey = trimmed
+        } catch {
+            kimiAPIKeyError = (error as? KimiAPIKeyStore.Failure)?.message ?? "Kimi Keychain 保存失败"
+        }
     }
 
     private static func storedVisibleRuntimeScopes(defaults: UserDefaults) -> [RuntimeScope] {
@@ -4860,6 +4926,63 @@ struct UsageWidgetView: View {
             return items
         }
 
+        if store.selectedRuntimeScope == .kimi {
+            if snapshot.fiveHourQuota == nil
+                && snapshot.sevenDayQuota == nil
+                && snapshot.monthlyQuota == nil {
+                let keychainError = snapshot.messages.first { $0.contains("Keychain") }
+                let needsCredential = keychainError != nil || messages.contains("凭证") || messages.contains("credential")
+                    || messages.contains("登录状态")
+                items.append(DiagnosticItem(
+                    id: needsCredential ? "kimi-credential" : "kimi-quota-unavailable",
+                    title: keychainError != nil
+                        ? language.text("Kimi Keychain 暂不可用", "Kimi Keychain unavailable")
+                        : needsCredential
+                        ? language.text("需要 Kimi Code 凭证", "Kimi Code credential needed")
+                        : language.text("暂未取得 Kimi 额度", "Kimi quota unavailable"),
+                    detail: keychainError.map { language.text($0, "Kimi credentials could not be read or saved in Keychain. Retry after unlocking Keychain.") } ?? (needsCredential
+                        ? language.text(
+                            "可登录 Kimi Code，或在此处填写 Kimi Code 平台的 sk-kimi-xxx API Key；凭证只保存在本机。",
+                            "Sign in to Kimi Code, or enter a Kimi Code platform sk-kimi-xxx API key here. The credential stays on this Mac."
+                        )
+                        : language.text(
+                            "额度来自 Kimi Coding Plan 官方接口，可点击刷新重试。",
+                            "Quota comes from the official Kimi Coding Plan API. Refresh to retry."
+                        )),
+                    systemName: needsCredential ? "key.fill" : "exclamationmark.triangle.fill",
+                    tint: needsCredential ? FixedVisualPalette.statusInfo : FixedVisualPalette.statusWarning
+                ))
+            }
+
+            if store.homeStatus(kind: .local).phase == .unavailable {
+                items.append(DiagnosticItem(
+                    id: "kimi-local-usage",
+                    title: language.text("暂无 Kimi 本机用量记录", "No local Kimi usage records yet"),
+                    detail: language.text(
+                        "本机 token 统计来自 ~/.kimi-code/sessions 下的会话日志，只累计 usage.record 事件，不读取对话内容。",
+                        "Local token stats come from session logs under ~/.kimi-code/sessions and only sum usage.record events; conversation content is never read."
+                    ),
+                    systemName: "doc.text.magnifyingglass",
+                    tint: FixedVisualPalette.statusInfo
+                ))
+            }
+
+            let notes = items.isEmpty ? snapshot.messages : snapshot.messages.filter {
+                $0.contains("会话日志读取失败") || $0.contains("无效 token") || $0.contains("超出可表示范围")
+            }
+            items.append(contentsOf: notes.prefix(3).enumerated().map { index, message in
+                    DiagnosticItem(
+                        id: "kimi-message-\(index)",
+                        title: language.text("运行提示", "Runtime note"),
+                        detail: localizedReaderMessage(message, language: language),
+                        systemName: "info.circle.fill",
+                        tint: FixedVisualPalette.statusInfo
+                    )
+                })
+
+            return items
+        }
+
         if (snapshot.fiveHourQuota == nil
             && snapshot.sevenDayQuota == nil
             && snapshot.monthlyQuota == nil) || snapshot.account == nil {
@@ -5220,6 +5343,17 @@ struct SettingsPanelView: View {
                                 .joined(separator: ", ")
                         )
                     }
+
+                    SettingsPickerRow(
+                        title: language.text("Kimi API Key", "Kimi API Key"),
+                        detail: kimiAPIKeyDetail
+                    ) {
+                        KimiAPIKeyControl(
+                            value: settings.kimiAPIKey,
+                            language: language,
+                            onCommit: { settings.setKimiAPIKey($0) }
+                        )
+                    }
                 }
 
                 settingsSection(
@@ -5455,6 +5589,18 @@ struct SettingsPanelView: View {
             "Click to change visibility; at least one runtime must stay visible"
         )
     }
+
+    /// Explains where the Kimi credential comes from without exposing any part
+    /// of the key itself.
+    private var kimiAPIKeyDetail: String {
+        if let error = settings.kimiAPIKeyError {
+            return language.text(error, "Kimi credential could not be read or saved in Keychain. Retry after unlocking Keychain.")
+        }
+        return language.text(
+            "留空时读取本机 ~/.kimi-code 凭证；手填 Key 保存到本机 Keychain",
+            "Leave empty to use ~/.kimi-code; entered keys stay in this Mac's Keychain"
+        )
+    }
 }
 
 struct SettingsPickerRow<Control: View>: View {
@@ -5472,6 +5618,74 @@ struct SettingsPickerRow<Control: View>: View {
         SettingsBaseRow(title: title, detail: detail) {
             control
         }
+    }
+}
+
+/// Compact credential field for the Kimi runtime. The value is only committed
+/// on return or focus loss so a partially typed key is never persisted.
+struct KimiAPIKeyControl: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let value: String
+    let language: WidgetLanguage
+    let onCommit: (String) -> Void
+
+    @State private var draft: String = ""
+    @FocusState private var isFocused: Bool
+
+    private var hasStoredKey: Bool { !value.isEmpty }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SecureField(
+                language.text("sk-kimi-…", "sk-kimi-…"),
+                text: $draft
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: settingsControlFontSize, weight: .medium))
+            .focused($isFocused)
+            .onSubmit { commit() }
+            .onChange(of: isFocused) { focused in
+                if !focused { commit() }
+            }
+            .frame(width: settingsAccessoryColumnWidth - 62, height: settingsControlVisualHeight)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
+                    .fill(FixedVisualPalette.controlFill(colorScheme))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
+                            .strokeBorder(FixedVisualPalette.controlStroke(colorScheme), lineWidth: 0.8)
+                    )
+            )
+            .accessibilityLabel(language.text("Kimi API Key", "Kimi API Key"))
+
+            Button {
+                draft = ""
+                isFocused = false
+                onCommit("")
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasStoredKey && draft.isEmpty)
+            .help(language.text("清除已保存的 Key", "Clear the saved key"))
+            .accessibilityLabel(language.text("清除 Kimi API Key", "Clear Kimi API Key"))
+        }
+        .onAppear { draft = value }
+        .onChange(of: value) { newValue in
+            // Keep local edits intact while the field is focused so a refresh
+            // does not fight the user's typing.
+            if !isFocused, newValue != draft {
+                draft = newValue
+            }
+        }
+    }
+
+    private func commit() {
+        guard draft != value else { return }
+        onCommit(draft)
     }
 }
 
@@ -5614,6 +5828,8 @@ struct SettingsRuntimeMultiSelectControl: View {
             return "Codex"
         case .claudeCode:
             return language.text("Claude Code", "Claude Code")
+        case .kimi:
+            return language.text("Kimi", "Kimi")
         }
     }
 }
@@ -7345,14 +7561,14 @@ private enum QuotaParticleAnimationSelfTest {
             ParticleAnimationMode.storedOrDefault(defaults: defaults) == .standard,
             "missing particle animation preference should default to standard"
         )
-        let settings = AppSettings(defaults: defaults)
+        let settings = AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)"))
         settings.particleAnimationMode = .powerSaving
         expect(
             defaults.string(forKey: ParticleAnimationMode.storageKey) == ParticleAnimationMode.powerSaving.rawValue,
             "particle animation preference should persist immediately"
         )
         expect(
-            AppSettings(defaults: defaults).particleAnimationMode == .powerSaving,
+            AppSettings(defaults: defaults, kimiKeyStore: KimiAPIKeyStore(service: "codexU.self-test.\(UUID().uuidString)")).particleAnimationMode == .powerSaving,
             "particle animation preference should survive AppSettings recreation"
         )
         defaults.set("future-mode", forKey: ParticleAnimationMode.storageKey)
@@ -7593,7 +7809,7 @@ struct DetailedTokenMetricCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(formatUSD(usage?.estimatedCostUSD))
+                Text(formatUSD(usage?.estimatedCostForDisplay))
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -7727,12 +7943,12 @@ struct WoolProgressCard: View {
     let language: WidgetLanguage
     @Environment(\.visualTokens) private var visualTokens
 
-    private var cost: Double {
-        usage?.estimatedCostUSD ?? 0
+    private var cost: Double? {
+        usage?.estimatedCostForDisplay
     }
 
     private var usesReferencePricing: Bool {
-        usage?.usesReferencePricing == true
+        usage?.hasEstimatedCost == true && usage?.usesReferencePricing == true
     }
 
     private var maxValue: Double {
@@ -7740,6 +7956,7 @@ struct WoolProgressCard: View {
     }
 
     private var accent: Color {
+        guard let cost else { return .secondary }
         if cost >= 200 { return visualTokens.data.milestones[2].color }
         if cost >= 100 { return visualTokens.data.milestones[1].color }
         if cost >= 20 { return visualTokens.data.milestones[0].color }
@@ -7749,16 +7966,18 @@ struct WoolProgressCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: cost >= 20 ? "chart.line.uptrend.xyaxis" : "target")
+                Image(systemName: cost.map { $0 >= 20 } == true ? "chart.line.uptrend.xyaxis" : "target")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(accent)
                 Text(language.text("羊毛进度", "Value progress"))
                     .font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 8)
-                Text((usesReferencePricing ? "≈" : "") + formatUSD(usage?.estimatedCostUSD))
+                Text((usesReferencePricing ? "≈" : "") + formatUSD(usage?.estimatedCostForDisplay))
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .help(usesReferencePricing
+                    .help(cost == nil
+                        ? language.text("当前模型价格不可用，费用暂不可估算", "Model pricing is unavailable; cost cannot be estimated")
+                        : usesReferencePricing
                         ? language.text(
                             "包含尚无官方价格的模型；相关用量按 GPT-5.5 参考价折算",
                             "Includes models without official pricing; those tokens use the GPT-5.5 reference rate"
@@ -7770,10 +7989,16 @@ struct WoolProgressCard: View {
             }
             .frame(height: dashboardCardHeaderHeight, alignment: .center)
 
-            QuotaValueProgressBar(
-                currentValue: cost,
-                maxValue: maxValue
-            )
+            Group {
+                if let cost {
+                    QuotaValueProgressBar(currentValue: cost, maxValue: maxValue)
+                } else {
+                    Text(language.text("费用暂不可估算", "Cost estimate unavailable"))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             .frame(height: 18)
 
             HStack(spacing: 8) {
@@ -8173,7 +8398,7 @@ struct UsageTrendPanel: View {
     }
 
     private func showsModelAttribution(for trend: UsageTrend) -> Bool {
-        runtimeScope == .codex && trend.modelTrends != nil
+        (runtimeScope == .codex || runtimeScope == .kimi) && trend.modelTrends != nil
     }
 }
 
@@ -8389,7 +8614,9 @@ struct ModelUsageAreaChartCard: View {
     }
 
     private var costAvailable: Bool {
-        trend.sourceQuality == .detailed && trend.dayBuckets.contains { bucket in
+        trend.sourceQuality == .detailed
+        && trend.dayBuckets.allSatisfy { $0.tokens == 0 || $0.usage.hasEstimatedCost }
+        && trend.dayBuckets.contains { bucket in
             bucket.tokens > 0 && bucket.usage.estimatedCostUSD > 0
         }
     }
@@ -8504,6 +8731,12 @@ struct ModelUsageAreaChartCard: View {
             return language.text(
                 "切换每日 token 与 API 等效估算费用；费用不代表官方账单。",
                 "Switch between daily tokens and API-equivalent estimated cost; this is not an official bill."
+            )
+        }
+        if trend.sourceQuality == .detailed {
+            return language.text(
+                "当前没有可用的模型价格，估算费用暂不可用。",
+                "No model pricing is available, so estimated cost is unavailable."
             )
         }
         return language.text(
@@ -10620,10 +10853,11 @@ private let heatmapCellSize: CGFloat = 10
 private let chartTooltipWidth: CGFloat = 188
 
 func runtimeStatusPopoverHeight(for runtimeCount: Int, hasAttention: Bool) -> CGFloat {
-    if runtimeCount <= 1 {
-        return hasAttention ? 302 : 246
-    }
-    return hasAttention ? 430 : 374
+    // Each runtime card adds a fixed row to the popover stack, so the height
+    // tracks the count instead of assuming a two-runtime maximum.
+    let visibleCards = max(1, runtimeCount)
+    let cardsAndChrome: CGFloat = 246 + CGFloat(visibleCards - 1) * 128
+    return hasAttention ? cardsAndChrome + 56 : cardsAndChrome
 }
 
 enum ChartTooltipLayout {
@@ -11412,6 +11646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             _ = installGlobalHotKeyHandler()
         }
         store.updateVisibleRuntimeScopes(settings.visibleRuntimeScopes)
+        store.updateKimiAPIKey(settings.kimiAPIKey, readError: settings.kimiAPIKeyError)
         store.start()
         updateStore.startAutomaticCheck()
         PerformanceMonitor.shared.end(startupPerformanceSpan)
@@ -11790,6 +12025,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateStatusItem()
+            }
+            .store(in: &cancellables)
+
+        settings.$kimiAPIKey
+            .combineLatest(settings.$kimiAPIKeyError)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] key, error in
+                self?.store.updateKimiAPIKey(key, readError: error)
             }
             .store(in: &cancellables)
 
@@ -12333,6 +12576,15 @@ struct codexUMain {
         }
         if CommandLine.arguments.contains("--self-test-runtime-fast-sources") {
             exit(RuntimeFastSourceSelfTest.run() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--self-test-kimi-quota") {
+            exit(KimiQuotaSelfTest.run() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--self-test-kimi-keychain") {
+            exit(KimiAPIKeyStoreSelfTest.run() ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--self-test-kimi-local-usage") {
+            exit(KimiLocalUsageSelfTest.run() ? 0 : 1)
         }
         if CommandLine.arguments.contains("--dump-json") {
             dumpJSON(MultiRuntimeUsageReader().load())

@@ -205,7 +205,7 @@ enum ModelUsageAreaSeriesBuilder {
                 usage.add(
                     tokens: bucket.usage.tokens,
                     costUSD: bucket.usage.estimatedCostUSD,
-                    usesReferencePricing: bucket.usage.usesReferencePricing
+                    usesReferencePricing: bucket.usage.usesReferencePricing, hasEstimatedCost: bucket.usage.hasEstimatedCost
                 )
                 result[bucket.id] = UsageDayBucket(
                     id: bucket.id,
@@ -225,6 +225,8 @@ enum ModelUsageAreaSeriesBuilder {
             )
         }
 
+        let costAvailable = sourceQuality == .detailed
+            && buckets.allSatisfy { $0.tokens == 0 || $0.usage.hasEstimatedCost }
         return ModelUsageAreaSeries(
             id: id,
             model: model,
@@ -232,8 +234,8 @@ enum ModelUsageAreaSeriesBuilder {
             dayBuckets: buckets,
             activeDayCount: buckets.filter { $0.tokens > 0 }.count,
             sourceQuality: sourceQuality,
-            costAvailable: sourceQuality == .detailed,
-            usesReferencePricing: sourceQuality == .detailed
+            costAvailable: costAvailable,
+            usesReferencePricing: costAvailable
                 && trends.contains { modelUsageUsesReferencePricing($0.model) }
         )
     }
@@ -272,7 +274,7 @@ enum ModelUsageTrendSelfTest {
                 result.add(
                     tokens: bucket.usage.tokens,
                     costUSD: bucket.usage.estimatedCostUSD,
-                    usesReferencePricing: bucket.usage.usesReferencePricing
+                    usesReferencePricing: bucket.usage.usesReferencePricing, hasEstimatedCost: bucket.usage.hasEstimatedCost
                 )
             }
         }
@@ -457,6 +459,32 @@ enum ModelUsageTrendSelfTest {
         )
         expect(approximate.first?.costAvailable == false, "approximate series should disable cost mode")
         expect(approximate.first?.usesReferencePricing == false, "disabled cost mode should not advertise reference pricing")
+
+        let unpricedBuckets = overallBuckets.map { bucket in
+            UsageDayBucket(id: bucket.id, date: bucket.date,
+                usage: PricedTokenUsage(tokens: bucket.usage.tokens, estimatedCostUSD: 0, hasEstimatedCost: false),
+                sourceQuality: .detailed)
+        }
+        let unpriced = ModelUsageTrend(id: "kimi", model: "kimi-code/k3", dayBuckets: unpricedBuckets,
+                                      summary: summary(for: unpricedBuckets), activeDayCount: unpricedBuckets.count)
+        let unpricedSeries = ModelUsageAreaSeriesBuilder.build(modelTrends: [unpriced], dateBuckets: dateBuckets, sourceQuality: .detailed)
+        expect(unpricedSeries.first?.costAvailable == false, "detailed tokens without pricing must disable cost mode")
+        expect(unpricedSeries.first?.usesReferencePricing == false, "unpriced tokens must not advertise a reference price")
+        expect(unpricedSeries.first?.dayBuckets.first?.usage.estimatedCostForDisplay == nil,
+               "series aggregation must preserve missing prices instead of showing zero")
+        do {
+            let missingPrice = unpricedBuckets[0].usage
+            let encoded = try JSONEncoder().encode(missingPrice)
+            let restored = try JSONDecoder().decode(PricedTokenUsage.self, from: encoded)
+            expect(restored.estimatedCostForDisplay == nil, "cached token details must retain an unknown price")
+            var legacy = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            legacy.removeValue(forKey: "hasEstimatedCost")
+            let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+            let legacyUsage = try JSONDecoder().decode(PricedTokenUsage.self, from: legacyData)
+            expect(legacyUsage.hasEstimatedCost, "previous priced caches must remain readable")
+        } catch {
+            failures.append("pricing availability round-trip failed: \(error)")
+        }
 
         let catalogPriced = ModelUsageAreaSeriesBuilder.build(
             modelTrends: [trend(model: "gpt-5.5", index: 0)],

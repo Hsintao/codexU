@@ -260,7 +260,7 @@ private func runtimeJSONObject(_ local: LocalUsage) -> [String: Any] {
                 [
                     "day": bucket.id,
                     "tokens": bucket.tokens,
-                    "estimatedCostUSD": bucket.usage.estimatedCostUSD
+                    "estimatedCostUSD": runtimeJSONValue(bucket.usage.estimatedCostForDisplay)
                 ] as [String: Any]
             } ?? NSNull(),
             "modelAttribution": trend.modelTrends == nil ? "unsupported" : "available",
@@ -350,7 +350,7 @@ private func runtimeJSONObject(_ usage: PricedTokenUsage) -> [String: Any] {
             "totalTokens": usage.tokens.totalTokens,
             "visibleTotalTokens": usage.tokens.visibleTotalTokens
         ] as [String: Any],
-        "estimatedCostUSD": usage.estimatedCostUSD,
+        "estimatedCostUSD": runtimeJSONValue(usage.estimatedCostForDisplay),
         "usesReferencePricing": usage.usesReferencePricing
     ] as [String: Any]
 }

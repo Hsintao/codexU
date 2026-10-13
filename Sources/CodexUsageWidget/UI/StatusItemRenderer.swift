@@ -537,12 +537,23 @@ struct StatusItemRenderer {
             return
         }
         drawText(
-            scope == .codex ? "C" : "A",
+            runtimeLogoFallbackCharacter(for: scope),
             in: rect,
             font: .systemFont(ofSize: max(6, rect.height * 0.64), weight: .bold),
             color: primaryTextColor,
             alignment: .center
         )
+    }
+
+    private func runtimeLogoFallbackCharacter(for scope: RuntimeScope) -> String {
+        switch scope {
+        case .codex:
+            return "C"
+        case .claudeCode:
+            return "A"
+        case .kimi:
+            return "K"
+        }
     }
 
     // Loaded template PNGs are immutable once decoded; cache them so each icon
@@ -557,6 +568,8 @@ struct StatusItemRenderer {
             resourceName = "codex-template"
         case .claudeCode:
             resourceName = "claudecode-template"
+        case .kimi:
+            resourceName = "kimi-template"
         }
         if let cached = Self.templateCache[resourceName] {
             return cached
@@ -567,9 +580,15 @@ struct StatusItemRenderer {
             return image
         }
 
-        let fallbackName = scope == .codex
-            ? "apple.terminal.fill"
-            : "curlybraces.square.fill"
+        let fallbackName: String
+        switch scope {
+        case .codex:
+            fallbackName = "apple.terminal.fill"
+        case .claudeCode:
+            fallbackName = "curlybraces.square.fill"
+        case .kimi:
+            fallbackName = "sparkles.square.fill"
+        }
         let configuration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
         return NSImage(systemSymbolName: fallbackName, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration)

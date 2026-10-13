@@ -11,6 +11,17 @@
 
 ## Unreleased
 
+- 新增 Kimi Runtime：主界面、菜单栏 Runtime 卡片、设置页展示开关和状态栏图标都可选择 Kimi，与 Codex、Claude Code 并列。
+- Kimi 额度读取 Kimi Coding Plan 官方 `GET /usages` 接口，映射 5 小时、7 日和月度窗口；接口未返回的窗口保持隐藏，读取失败保留上次成功值并标记过期，缺失数据不伪造成 0。
+- Kimi 支持设置页填写 `sk-kimi-xxx` API Key，保存在本机 Keychain 并迁移旧偏好；未填写时读取本机 `~/.kimi-code` 凭证。过期时用 refresh token 刷新，完整刷新结果只留在内存中，不回写 Kimi Code 文件。
+- Kimi 新增本机 token 用量统计：读取 `~/.kimi-code/sessions/**/agents/*/wire.jsonl` 的 `usage.record` 事件，提供今日、7 日、月度、累计、每日趋势和热力图，与官方额度并列展示在同一张 Kimi 卡片。
+- Kimi 本机统计只累加 `usage.record`（`inputOther` / `inputCacheRead` / `inputCacheCreation` / `output`），显式排除 `token_counting.*` 上下文水位事件；经 Kimi Code CLI 的全部提供商路由都计入并按模型拆分，按会话文件缓存指纹增量重算。
+- Kimi 新增项目排行：从会话 `state.json` 的 `cwd` 归因到工作目录，按 token 排序，无 cwd 的会话不计入项目但仍计入总量。
+- Kimi 新增工具与 Skill 统计、推理性能和按模型用量趋势：解析会话日志中的 `tool.call` 与 `llm.request`，Skill token 估算来自本机可定位的 SKILL.md，推理时长按模型 × thinking effort 分组，项目会话数按贡献会话文件去重。
+- 修复 Kimi 本机统计一直显示「历史统计正在补全」的问题：历史索引只产出 Codex 与 Claude Code 的归档，Kimi 改由直接读取本机会话日志解析，不再等待不会到来的归档。
+- 修复缓存恢复后 Kimi 用量不刷新、切换 Key 后接受旧账户额度和旧版周额度映射；日志失败会重试，异常数值不再导致崩溃，当前统计排除未来记录，未知费用显示 `--`。
+- Runtime 菜单高度按 Runtime 数量自适应，避免三个 Runtime 时内容裁切。
+
 ## 1.3.1 - 2026-09-01
 
 - 完成独立 Windows x86_64 Tauri Dashboard V0：Overview、Tasks、AI Leadership、Usage、Inference、Projects、Skills 和 Settings 八个 Web surface 统一接入本地数据管线。
