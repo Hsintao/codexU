@@ -9,6 +9,8 @@ interface UsageHeatmapProps {
 export function UsageHeatmap({ trend }: UsageHeatmapProps) {
   const { t } = useI18n();
   const weeks = trend?.heatmap_weeks ?? [];
+  // Keep the six-month scale even when only a few weeks were returned.
+  const columnCount = Math.max(26, weeks.length);
 
   return (
     <article className="glass-panel p-4 sm:p-5" aria-label={t('usage.recentUsage')}>
@@ -32,10 +34,10 @@ export function UsageHeatmap({ trend }: UsageHeatmapProps) {
             className="usage-heatmap-grid mt-2"
             role="grid"
             aria-label={t('usage.dailyUsage')}
-            style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
           >
             {weeks.map((week, weekIndex) => (
-              <div className="usage-heatmap-week" role="row" key={`week-${weekIndex}`}>
+              <div className="usage-heatmap-week" role="row" key={`week-${weekIndex}`} style={{ gridColumn: columnCount - weeks.length + weekIndex + 1 }}>
                 {week.map((day) => (
                   <HeatmapCell key={day.id} day={day} thresholds={trend?.heatmap_thresholds ?? []} t={t} />
                 ))}

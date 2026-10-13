@@ -1,4 +1,4 @@
-import { Activity, Eye, Puzzle } from 'lucide-react';
+import { Eye, Puzzle } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import type { SkillUsage, ToolUsage } from '../types/models';
 import { useI18n } from '../i18n/I18nProvider';
@@ -97,15 +97,12 @@ export function SkillsPanel({ skills, tools }: SkillsPanelProps) {
                       className="skill-activity-bar"
                       role="img"
                       aria-label={t('skills.relativeActivityValue', { value: intensity })}
+                      title={t('skills.percentOfTop', { value: intensity })}
                       style={{ '--skill-intensity': `${intensity}%` } as SkillActivityStyle}
                     />
-                    <p className="mt-1 text-[11px] text-tertiary sm:text-right">
-                      {t('skills.percentOfTop', { value: intensity })}
-                    </p>
                   </div>
                   <div className="w-20 shrink-0 text-right">
                     <p className="text-sm font-semibold tabular-nums text-primary">{formatCount(reads)}</p>
-                    <p className="mt-0.5 text-[11px] text-tertiary">{t('skills.localReads')}</p>
                   </div>
                 </div>
               </article>
@@ -113,10 +110,6 @@ export function SkillsPanel({ skills, tools }: SkillsPanelProps) {
           })}
         </div>
 
-        <p className="mt-3 flex items-center gap-1.5 text-xs text-tertiary">
-          <Activity size={13} aria-hidden="true" />
-          {t('skills.localOnly')}
-        </p>
       </section>
       <ToolUsageList tools={tools} />
     </div>

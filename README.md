@@ -21,14 +21,16 @@ codexU 是一个 macOS 菜单栏与桌面应用，用来查看 OpenAI Codex / Ch
 
 ## Windows 版本已发布
 
-当前 Windows x86_64 桌面版本随 [GitHub v1.3.2 Release](https://github.com/shanggqm/codexU/releases/tag/v1.3.2) 提供，并包含完整的独立 Tauri Dashboard；安装包提供 MSI 与 NSIS 两种方式：
+当前 Windows x86_64 桌面版本随 [GitHub Windows v1.3.4 Release](https://github.com/shanggqm/codexU/releases/tag/windows-v1.3.4) 提供，并包含完整的独立 Tauri Dashboard；安装包提供 MSI 与 NSIS 两种方式：
 
-- `codexU-1.3.2-windows-x86_64.msi`：适合通过 Windows Installer 安装。
-- `codexU-1.3.2-windows-x86_64-setup.exe`：适合通过 NSIS 安装向导安装。
+- `codexU-1.3.4-windows-x86_64.msi`：适合通过 Windows Installer 安装。
+- `codexU-1.3.4-windows-x86_64-setup.exe`：适合通过 NSIS 安装向导安装。
 - 支持 Windows 10/11 x86_64；Windows ARM64 当前尚未打包。
 - 验证环境说明：本轮 Windows V0 的原生视觉矩阵与 shell lifecycle 验收在按 build `26200` 归类的 Windows 11 环境完成；Windows 10 仍是支持目标，但未在本轮实机观测。
 - Windows 版本读取 `%USERPROFILE%\.codex\` 等本机数据，保持本地优先和隐私边界，不上传 usage、线程、路径、日志或账户数据。
 - Windows 版本当前只支持 Codex，暂不支持 Claude Code。
+
+Windows v1.3.4 修复额度刷新触发插件市场下载与磁盘持续增长，并修复历史大记录、Dashboard 显示及设置页版本信息。macOS 仍为 v1.3.2，本次 Windows 更新不重打 macOS 安装包。
 
 Windows 版本是独立的 Tauri 桌面实现，当前发布包尚未由仓库默认流程进行代码签名；Windows 可能在首次运行时显示安全提示。Windows 与 macOS 的功能实现仍在分别演进，当前功能覆盖并不完全相同。
 
@@ -84,6 +86,8 @@ Windows 版本是独立的 Tauri 桌面实现，当前发布包尚未由仓库�
 - 本地读取数据，不上传 usage、线程或账户数据到第三方服务。
 
 ## 羊毛进度
+
+macOS 与 Windows 使用同一份本地模型价格表，包含 GPT-6 系列的缓存读取、缓存写入和服务层级规则。价格缺失时明确标注参考估算；详细来源与缓存重算规则见[共享模型定价](docs/MODEL_PRICING.md)。运行时不请求在线报价。
 
 “羊毛进度”是 codexU 对本月 Codex 使用量的 API 等效价值估算。它把本机解析到的普通输入、cache write、命中缓存输入和输出 token，按对应模型及实际 service tier 的 OpenAI API token 单价折算成美元金额，并和 Plus、Pro 100、Pro 200 以及参考月上限做对比。这个指标解决的问题是：Codex 额度本身通常只显示百分比和重置时间，token 数量也不容易直观看出“用了多少价值”；羊毛进度提供一个统一的金额口径，帮助你判断本月订阅成本大致回收到了哪个区间。
 
@@ -142,7 +146,7 @@ codexU 需要读取本机 `~/.codex/` 下的 Codex 数据；如果启用 Claude 
 
 ### Windows
 
-从 [GitHub Release](https://github.com/shanggqm/codexU/releases/latest) 下载 Windows x86_64 安装包：
+从 [Windows Release](https://github.com/shanggqm/codexU/releases/tag/windows-v1.3.4) 下载 Windows x86_64 安装包：
 
 - MSI：`codexU-<version>-windows-x86_64.msi`
 - NSIS：`codexU-<version>-windows-x86_64-setup.exe`
@@ -215,7 +219,7 @@ Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTI
 
 ## 数据来源
 
-- 可执行程序：按应用标识定位 ChatGPT/Codex，兼容新版内嵌 `codex-cli/CodexCLI.app`、`codex-cli/bin/codex`、旧版内嵌程序和常规 CLI 安装路径。
+- 可执行程序：按应用标识定位 ChatGPT/Codex，兼容新版内嵌 `codex-cli/CodexCLI.app`、`codex-cli/bin/codex`、旧版内嵌程序和常规 CLI 安装路径。macOS 保留这些路径的既有选择顺序，仅在它们都不可用时补查 `~/.local/bin/codex`。
 - 账户与额度：`codex app-server` 的 `account/read`、`account/rateLimits/read`、`account/usage/read`。
 - 本机 token 总量：`~/.codex/state_5.sqlite`。
 - 精细 token 拆分：`~/.codex/sessions/**/rollout-*.jsonl` 和 `~/.codex/archived_sessions/*.jsonl` 中的 `token_count` 事件。

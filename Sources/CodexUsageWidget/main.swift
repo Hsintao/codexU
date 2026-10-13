@@ -464,40 +464,6 @@ struct DiagnosticItem: Identifiable {
     let tint: Color
 }
 
-private struct ModelTokenPrice {
-    let model: String
-    let inputPerMillion: Double
-    let cachedInputPerMillion: Double
-    let cacheWriteInputPerMillion: Double
-    let outputPerMillion: Double
-    let fastModeMultiplier: Double?
-    let longContextInputMultiplier: Double?
-    let longContextOutputMultiplier: Double?
-    let usesReferencePricing: Bool
-
-    init(
-        model: String,
-        inputPerMillion: Double,
-        cachedInputPerMillion: Double,
-        outputPerMillion: Double,
-        cacheWriteInputPerMillion: Double? = nil,
-        fastModeMultiplier: Double? = nil,
-        longContextInputMultiplier: Double? = nil,
-        longContextOutputMultiplier: Double? = nil,
-        usesReferencePricing: Bool
-    ) {
-        self.model = model
-        self.inputPerMillion = inputPerMillion
-        self.cachedInputPerMillion = cachedInputPerMillion
-        self.cacheWriteInputPerMillion = cacheWriteInputPerMillion ?? inputPerMillion
-        self.outputPerMillion = outputPerMillion
-        self.fastModeMultiplier = fastModeMultiplier
-        self.longContextInputMultiplier = longContextInputMultiplier
-        self.longContextOutputMultiplier = longContextOutputMultiplier
-        self.usesReferencePricing = usesReferencePricing
-    }
-}
-
 private struct SessionUsageSource {
     let threadId: String
     let rolloutPath: String
@@ -579,15 +545,15 @@ private struct DetailedUsageAccumulator {
         monthStart: Date
     ) {
         let cost = estimatedCostUSD(tokens: tokens, price: price, serviceTier: serviceTier)
-        lifetime.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+        lifetime.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         if date >= monthStart {
-            month.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+            month.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         }
         if date >= sevenDayStart {
-            sevenDay.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+            sevenDay.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         }
         if date >= dayStart {
-            today.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.usesReferencePricing)
+            today.add(tokens: tokens, costUSD: cost, usesReferencePricing: price.isReference(serviceTier: serviceTier))
         }
     }
 
@@ -2056,7 +2022,7 @@ final class CodexUsageReader {
                 sessionUsage.add(
                     tokens: delta.tokens,
                     costUSD: cost,
-                    usesReferencePricing: price.usesReferencePricing
+                    usesReferencePricing: price.isReference(serviceTier: delta.serviceTier)
                 )
                 accumulator.add(
                     delta.tokens,
@@ -2074,7 +2040,7 @@ final class CodexUsageReader {
                     usage.add(
                         tokens: delta.tokens,
                         costUSD: cost,
-                        usesReferencePricing: price.usesReferencePricing
+                        usesReferencePricing: price.isReference(serviceTier: delta.serviceTier)
                     )
                     dailyUsage[key] = usage
 
@@ -2084,7 +2050,7 @@ final class CodexUsageReader {
                     modelDayUsage.add(
                         tokens: delta.tokens,
                         costUSD: cost,
-                        usesReferencePricing: price.usesReferencePricing
+                        usesReferencePricing: price.isReference(serviceTier: delta.serviceTier)
                     )
                     modelUsage[key] = modelDayUsage
                     dailyUsageByModel[modelID] = modelUsage
@@ -2989,6 +2955,9 @@ final class CodexUsageReader {
 
         if object["type"] as? String == "turn_context" {
             applyTurnContextModel(payload["model"] as? String, to: &activeModel)
+            if let tier = payload["service_tier"] as? String {
+                activeServiceTier = normalizedServiceTier(tier)
+            }
             if let timestamp = object["timestamp"] as? String,
                let date = fractionalFormatter.date(from: timestamp) ?? plainFormatter.date(from: timestamp) {
                 inferenceTracker.applyTurnContext(
@@ -3661,135 +3630,7 @@ func estimateStaticTokens(_ text: String) -> Int64 {
 }
 
 private func modelTokenPrice(for model: String?) -> ModelTokenPrice {
-    let normalized = (model ?? "").lowercased()
-
-    if normalized.contains("gpt-5.6-sol") || normalized == "gpt-5.6" {
-        return ModelTokenPrice(
-            model: "gpt-5.6-sol",
-            inputPerMillion: 5,
-            cachedInputPerMillion: 0.5,
-            outputPerMillion: 30,
-            cacheWriteInputPerMillion: 6.25,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.6-terra") {
-        return ModelTokenPrice(
-            model: "gpt-5.6-terra",
-            inputPerMillion: 2,
-            cachedInputPerMillion: 0.2,
-            outputPerMillion: 12,
-            cacheWriteInputPerMillion: 2.5,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.6-luna") {
-        return ModelTokenPrice(
-            model: "gpt-5.6-luna",
-            inputPerMillion: 0.2,
-            cachedInputPerMillion: 0.02,
-            outputPerMillion: 1.2,
-            cacheWriteInputPerMillion: 0.25,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.5-pro") {
-        return ModelTokenPrice(
-            model: "gpt-5.5-pro",
-            inputPerMillion: 30,
-            cachedInputPerMillion: 30,
-            outputPerMillion: 180,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.5") || normalized == "chat-latest" {
-        return ModelTokenPrice(
-            model: "gpt-5.5",
-            inputPerMillion: 5,
-            cachedInputPerMillion: 0.5,
-            outputPerMillion: 30,
-            fastModeMultiplier: 2.5,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.4-mini") {
-        return ModelTokenPrice(
-            model: "gpt-5.4-mini",
-            inputPerMillion: 0.75,
-            cachedInputPerMillion: 0.075,
-            outputPerMillion: 4.5,
-            fastModeMultiplier: 2,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.4-nano") {
-        return ModelTokenPrice(model: "gpt-5.4-nano", inputPerMillion: 0.2, cachedInputPerMillion: 0.02, outputPerMillion: 1.25, usesReferencePricing: false)
-    }
-    if normalized.contains("gpt-5.4-pro") {
-        return ModelTokenPrice(
-            model: "gpt-5.4-pro",
-            inputPerMillion: 30,
-            cachedInputPerMillion: 30,
-            outputPerMillion: 180,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.4") {
-        return ModelTokenPrice(
-            model: "gpt-5.4",
-            inputPerMillion: 2.5,
-            cachedInputPerMillion: 0.25,
-            outputPerMillion: 15,
-            fastModeMultiplier: 2,
-            longContextInputMultiplier: 2,
-            longContextOutputMultiplier: 1.5,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.3-codex-spark") {
-        return ModelTokenPrice(
-            model: "gpt-5.3-codex-spark",
-            inputPerMillion: 5,
-            cachedInputPerMillion: 0.5,
-            outputPerMillion: 30,
-            usesReferencePricing: true
-        )
-    }
-    if normalized.contains("gpt-5.3-codex") {
-        return ModelTokenPrice(
-            model: "gpt-5.3-codex",
-            inputPerMillion: 1.75,
-            cachedInputPerMillion: 0.175,
-            outputPerMillion: 14,
-            fastModeMultiplier: 2,
-            usesReferencePricing: false
-        )
-    }
-    if normalized.contains("gpt-5.2-codex")
-        || normalized.contains("gpt-5.3-chat")
-        || normalized.contains("gpt-5.2") {
-        return ModelTokenPrice(model: "gpt-5.2-codex", inputPerMillion: 1.75, cachedInputPerMillion: 0.175, outputPerMillion: 14, usesReferencePricing: false)
-    }
-    if normalized.contains("gpt-5-codex") || normalized == "gpt-5" {
-        return ModelTokenPrice(model: "gpt-5", inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10, usesReferencePricing: false)
-    }
-
-    return ModelTokenPrice(model: "gpt-5.5", inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30, usesReferencePricing: true)
+    ModelPricingCatalog.shared.price(for: model)
 }
 
 func modelUsageUsesReferencePricing(_ model: String?) -> Bool {
@@ -3830,37 +3671,13 @@ private func estimatedCostUSD(
     price: ModelTokenPrice,
     serviceTier: String? = nil
 ) -> Double {
-    let usesLongContextPricing = tokens.inputTokens > 272_000
-        && price.longContextInputMultiplier != nil
-        && price.longContextOutputMultiplier != nil
-    let inputMultiplier: Double
-    let outputMultiplier: Double
-    if usesLongContextPricing {
-        // Fast mode does not support long-context requests, so the published
-        // long-context rates are the only applicable API-equivalent basis.
-        inputMultiplier = price.longContextInputMultiplier ?? 1
-        outputMultiplier = price.longContextOutputMultiplier ?? 1
-    } else if isFastServiceTier(serviceTier), let fastModeMultiplier = price.fastModeMultiplier {
-        inputMultiplier = fastModeMultiplier
-        outputMultiplier = fastModeMultiplier
-    } else {
-        inputMultiplier = 1
-        outputMultiplier = 1
-    }
-
-    let uncachedInputCost = Double(tokens.ordinaryUncachedInputTokens) / 1_000_000
-        * price.inputPerMillion * inputMultiplier
-    let cachedInputCost = Double(tokens.billableCachedInputTokens) / 1_000_000
-        * price.cachedInputPerMillion * inputMultiplier
-    let cacheWriteInputCost = Double(tokens.billableCacheWriteInputTokens) / 1_000_000
-        * price.cacheWriteInputPerMillion * inputMultiplier
-    let outputCost = Double(max(tokens.outputTokens, 0)) / 1_000_000
-        * price.outputPerMillion * outputMultiplier
-    return uncachedInputCost + cachedInputCost + cacheWriteInputCost + outputCost
+    price.estimate(input: tokens.inputTokens, cached: tokens.cachedInputTokens,
+                   write: tokens.cacheWriteInputTokens, output: tokens.outputTokens, serviceTier: serviceTier)
 }
 
 private enum ModelPricingSelfTest {
     static func run() -> Bool {
+        guard SharedModelPricingSelfTest.run() else { return false }
         var failures: [String] = []
         func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
             if !condition() { failures.append(message) }
@@ -3889,7 +3706,7 @@ private enum ModelPricingSelfTest {
         expect(!sol.usesReferencePricing, "gpt-5.6 should use an explicit price")
         expect(terra.model == "gpt-5.6-terra", "terra snapshots should preserve the terra price")
         expect(luna.model == "gpt-5.6-luna", "luna matching should be case-insensitive")
-        expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: sol), 0.62), "Sol cached input estimate should use the split rates")
+        expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: sol), 0.456), "Sol cached input estimate should use the split rates")
         expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: terra), 0.248), "Terra should use the official standard API rates")
         expect(nearlyEqual(estimatedCostUSD(tokens: sampleTokens, price: luna), 0.0248), "Luna should use the official standard API rates")
         expect(nearlyEqual(gpt55.inputPerMillion, 5) && nearlyEqual(gpt55.cachedInputPerMillion, 0.5) && nearlyEqual(gpt55.outputPerMillion, 30), "GPT-5.5 should use the official standard API rates")
@@ -3906,8 +3723,8 @@ private enum ModelPricingSelfTest {
             reasoningOutputTokens: 0,
             totalTokens: 110_000
         )
-        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol), 0.6325), "GPT-5.6 cache writes should use the 1.25x write rate")
-        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol, serviceTier: "priority"), 1.265), "GPT-5.6 Fast mode should use the published 2x API rates")
+        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol), 0.466), "GPT-5.6 cache writes should use the 1.25x write rate")
+        expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: sol, serviceTier: "priority"), 0.932), "GPT-5.6 Fast mode should use the published 2x API rates")
         expect(nearlyEqual(estimatedCostUSD(tokens: cacheWriteTokens, price: gpt55, serviceTier: "fast"), 1.55), "GPT-5.5 Fast mode should use the published 2.5x API rates")
 
         let longContextTokens = TokenBreakdown(
@@ -3918,7 +3735,7 @@ private enum ModelPricingSelfTest {
             reasoningOutputTokens: 0,
             totalTokens: 400_000
         )
-        expect(nearlyEqual(estimatedCostUSD(tokens: longContextTokens, price: sol), 6.85), "GPT-5.6 long context should use 2x input and 1.5x output rates")
+        expect(nearlyEqual(estimatedCostUSD(tokens: longContextTokens, price: sol), 4.88), "GPT-5.6 long context should use 2x input and 1.5x output rates")
         expect(isFastServiceTier("priority") && isFastServiceTier("FAST") && !isFastServiceTier("default"), "service tier normalization should distinguish Fast mode")
         expect(!modelUsageUsesReferencePricing("gpt-5.6-luna"), "known GPT-5.6 models should not use reference pricing")
         expect(modelUsageUsesReferencePricing("gpt-5.3-codex-spark"), "Codex Spark should not inherit GPT-5.3 Codex pricing")
@@ -7760,8 +7577,8 @@ struct WoolProgressCard: View {
                     .monospacedDigit()
                     .help(usesReferencePricing
                         ? language.text(
-                            "包含尚无官方价格的模型；相关用量按 GPT-5.5 参考价折算",
-                            "Includes models without official pricing; those tokens use the GPT-5.5 reference rate"
+                            "包含缺少专属价格的模型或计费条件，按参考费率折算；不代表实际账单",
+                            "Includes reference rates for unpriced models or billing conditions; this is not an actual bill"
                         )
                         : language.text("按对应模型的官方 API 价格估算", "Estimated with each model's official API price"))
                 Text("/ \(formatCompactUSD(maxValue))")
@@ -8497,8 +8314,8 @@ struct ModelUsageAreaChartCard: View {
         if costAvailable {
             if usesReferencePricing {
                 return language.text(
-                    "部分模型没有独立价格，费用按 GPT-5.5 价格作参考折算；不代表官方账单。",
-                    "Some models have no dedicated price, so cost uses GPT-5.5 pricing as a reference; this is not an official bill."
+                    "包含缺少专属价格的模型或计费条件，按参考费率折算；不代表实际账单。",
+                    "Includes reference rates for unpriced models or billing conditions; this is not an actual bill."
                 )
             }
             return language.text(
@@ -12351,7 +12168,7 @@ func priceArchivedContribution(_ value: UsageDayContribution) -> PricedTokenUsag
     let price = modelTokenPrice(for: value.model)
     return PricedTokenUsage(tokens: value.tokens,
         estimatedCostUSD: estimatedCostUSD(tokens: value.tokens, price: price, serviceTier: value.serviceTier),
-        usesReferencePricing: price.usesReferencePricing)
+        usesReferencePricing: price.isReference(serviceTier: value.serviceTier))
 }
 
 extension CodexUsageReader {

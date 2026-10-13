@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::common::{
-    index_codex_rollout_files, CodexRolloutIndexEntry, FileFingerprint, MAX_LINE_BYTES,
-    READ_CHUNK_BYTES,
+    fingerprint_for, index_codex_rollout_files, CodexRolloutIndexEntry, FileFingerprint,
+    MAX_LINE_BYTES, READ_CHUNK_BYTES,
 };
+use super::history_integrity::{read_json_record, write_cache_atomically, HistoryReadError};
 use crate::models::{
     InferencePerformanceArchive, InferencePerformanceBuilder, InferencePerformanceHistory,
     InferencePerformanceSample, TokenBreakdown, INFERENCE_MINIMUM_CALL_DURATION_SECONDS,
@@ -16,7 +17,7 @@ use crate::models::{
 use crate::StatisticsTimeZone;
 
 const INFERENCE_CACHE_VERSION: i32 = 2;
-const INFERENCE_PARSER_VERSION: i32 = 2;
+const INFERENCE_PARSER_VERSION: i32 = 4;
 const MAXIMUM_ARCHIVE_BYTES: u64 = 32 * 1024 * 1024;
 const MAXIMUM_SAMPLE_COUNT: usize = 50_000;
 
@@ -101,7 +102,7 @@ impl InferencePerformanceReader {
         codex_root: impl AsRef<Path>,
         now: DateTime<Utc>,
     ) -> anyhow::Result<Option<InferencePerformanceHistory>> {
-        let index = index_codex_rollout_files(codex_root.as_ref()).await;
+        let index = index_codex_rollout_files(codex_root.as_ref()).await?;
         self.load_from_index(&index, now).await
     }
 
@@ -123,29 +124,28 @@ impl InferencePerformanceReader {
             HashMap::new();
         for indexed in index {
             let file = &indexed.path;
+            let fingerprint = fingerprint_for(file)
+                .await
+                .ok_or(HistoryReadError::Unavailable)?;
             let key = source_identifier(file);
-            let cached = indexed.fingerprint.as_ref().and_then(|fingerprint| {
-                cache
-                    .entries
-                    .get(&key)
-                    .filter(|entry| entry.matches(fingerprint))
-                    .map(|entry| entry.parsed.clone())
-            });
+            let cached = cache
+                .entries
+                .get(&key)
+                .filter(|entry| entry.matches(&fingerprint))
+                .map(|entry| entry.parsed.clone());
             let parsed = if let Some(parsed) = cached {
                 parsed
             } else {
-                let parsed = parse_inference_samples(file).await;
-                if let Some(fingerprint) = indexed.fingerprint {
-                    cache.entries.insert(
-                        key,
-                        InferenceFileCacheEntry {
-                            file_size: fingerprint.file_size,
-                            modification_time_ns: fingerprint.modification_time_ns,
-                            parser_version: INFERENCE_PARSER_VERSION,
-                            parsed: parsed.clone(),
-                        },
-                    );
-                }
+                let parsed = parse_inference_samples(file).await?;
+                cache.entries.insert(
+                    key,
+                    InferenceFileCacheEntry {
+                        file_size: fingerprint.file_size,
+                        modification_time_ns: fingerprint.modification_time_ns,
+                        parser_version: INFERENCE_PARSER_VERSION,
+                        parsed: parsed.clone(),
+                    },
+                );
                 parsed
             };
             samples_by_source_id
@@ -192,12 +192,7 @@ impl InferencePerformanceReader {
         if data.len() as u64 > MAXIMUM_ARCHIVE_BYTES {
             return false;
         }
-        if let Some(parent) = path.parent() {
-            if tokio::fs::create_dir_all(parent).await.is_err() {
-                return false;
-            }
-        }
-        tokio::fs::write(path, data).await.is_ok()
+        write_cache_atomically(&path, &data).await.is_ok()
     }
 
     fn archive_path(&self) -> PathBuf {
@@ -213,11 +208,11 @@ struct ParsedInferenceFile {
     samples: Vec<InferencePerformanceSample>,
 }
 
-async fn parse_inference_samples(path: &Path) -> ParsedInferenceFile {
+async fn parse_inference_samples(path: &Path) -> Result<ParsedInferenceFile, HistoryReadError> {
     let mut parsed = ParsedInferenceFile::default();
-    let Ok(file) = tokio::fs::File::open(path).await else {
-        return parsed;
-    };
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|_| HistoryReadError::Unavailable)?;
 
     let mut tracker = InferenceCallTracker::default();
     let mut seen_sample_ids = HashSet::new();
@@ -226,9 +221,10 @@ async fn parse_inference_samples(path: &Path) -> ParsedInferenceFile {
     let mut oversized = false;
 
     loop {
-        let Ok(buffer) = reader.fill_buf().await else {
-            break;
-        };
+        let buffer = reader
+            .fill_buf()
+            .await
+            .map_err(|_| HistoryReadError::Unavailable)?;
         if buffer.is_empty() {
             break;
         }
@@ -249,7 +245,14 @@ async fn parse_inference_samples(path: &Path) -> ParsedInferenceFile {
 
         if newline.is_some() {
             if !oversized {
-                apply_inference_line(&line, &mut parsed, &mut tracker, &mut seen_sample_ids);
+                if let Some(object) = read_json_record(&line, true)? {
+                    apply_inference_object(
+                        &object,
+                        &mut parsed,
+                        &mut tracker,
+                        &mut seen_sample_ids,
+                    );
+                }
             }
             line.clear();
             oversized = false;
@@ -257,27 +260,20 @@ async fn parse_inference_samples(path: &Path) -> ParsedInferenceFile {
     }
 
     if !oversized {
-        apply_inference_line(&line, &mut parsed, &mut tracker, &mut seen_sample_ids);
+        if let Some(object) = read_json_record(&line, false)? {
+            apply_inference_object(&object, &mut parsed, &mut tracker, &mut seen_sample_ids);
+        }
     }
 
-    parsed
+    Ok(parsed)
 }
 
-fn apply_inference_line(
-    line: &[u8],
+fn apply_inference_object(
+    object: &serde_json::Value,
     parsed: &mut ParsedInferenceFile,
     tracker: &mut InferenceCallTracker,
     seen_sample_ids: &mut HashSet<String>,
 ) {
-    if line.is_empty() {
-        return;
-    }
-    let Ok(text) = std::str::from_utf8(line) else {
-        return;
-    };
-    let Ok(object) = serde_json::from_str::<serde_json::Value>(text) else {
-        return;
-    };
     let Some(payload) = object.get("payload") else {
         return;
     };
@@ -462,6 +458,7 @@ fn parse_usage(value: &serde_json::Value) -> Option<TokenBreakdown> {
     Some(TokenBreakdown {
         input_tokens: i64_value(value.get("input_tokens"))?,
         cached_input_tokens: i64_value(value.get("cached_input_tokens")).unwrap_or(0),
+        cache_write_input_tokens: 0,
         output_tokens: i64_value(value.get("output_tokens"))?,
         reasoning_output_tokens: i64_value(value.get("reasoning_output_tokens")).unwrap_or(0),
         total_tokens: i64_value(value.get("total_tokens")).unwrap_or(0),

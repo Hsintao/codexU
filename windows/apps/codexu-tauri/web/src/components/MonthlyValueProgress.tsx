@@ -1,6 +1,7 @@
 import { BadgeDollarSign } from 'lucide-react';
 import type { LocalUsage } from '../types/models';
 import { useI18n } from '../i18n/I18nProvider';
+import { formatQuantity } from '../utils/formatQuantity';
 
 interface MonthlyValueProgressProps {
   usage: LocalUsage | null | undefined;
@@ -26,12 +27,13 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
   }
 
   const monthCost = safeNonNegativeNumber(detailed.month?.estimated_cost_usd);
-  if (monthCost === null) {
+  const monthTokens = detailed.month ? Math.max(detailed.month.tokens.total_tokens, detailed.month.tokens.input_tokens + detailed.month.tokens.output_tokens) : null;
+  if (monthCost === null || (monthCost === 0 && monthTokens !== null && monthTokens > 0)) {
     return (
       <section className="glass-panel p-4 sm:p-5 dashboard-home-monthly-progress">
         <h3 className="text-sm font-semibold text-primary">{t('monthly.title')}</h3>
+        {monthTokens !== null && monthTokens > 0 ? <p className="mt-3 text-sm text-primary">{t('monthly.tokens', { value: formatQuantity(monthTokens) })}</p> : null}
         <p className="text-xs text-tertiary mt-1">{t('monthly.insufficient')}</p>
-        <p className="mt-3 text-xs text-tertiary">{t('monthly.noDetailedCost')}</p>
       </section>
     );
   }
@@ -43,10 +45,7 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
   return (
     <section className="glass-panel p-4 sm:p-5 dashboard-home-monthly-progress" aria-label={t('monthly.title')}>
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h3 className="text-sm font-semibold text-primary">{t('monthly.title')}</h3>
-          <p className="text-xs text-tertiary mt-1">{t('monthly.estimate')}</p>
-        </div>
+        <h3 className="text-sm font-semibold text-primary">{t('monthly.title')}</h3>
         <p className="text-xs text-tertiary text-right">{t('monthly.reference')}</p>
       </div>
 
@@ -56,23 +55,19 @@ export function MonthlyValueProgress({ usage }: MonthlyValueProgressProps) {
           style={{
             width: progressValue,
             background: 'linear-gradient(90deg, var(--data-primary), var(--data-secondary), var(--data-tertiary))',
-            borderRight: '1px solid color-mix(in oklab, var(--data-tertiary) 65%, transparent)',
+            borderRight: monthCost > 0 ? '1px solid color-mix(in oklab, var(--data-tertiary) 65%, transparent)' : 'none',
           }}
         />
 
         {markers.map((marker) => (
-          <Marker key={marker.label} label={marker.label} positionPercent={marker.positionPercent} />
+          <Marker key={marker.label} label={marker.label} value={marker.value} positionPercent={marker.positionPercent} />
         ))}
       </div>
 
-      <div className="mt-1 text-xs text-tertiary">
-        {monthCost > 0 ? t('monthly.mapped') : t('monthly.noUsage')}
-      </div>
-
       <p className="mt-2 text-xs text-primary">
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5" title={detailed.month.uses_reference_pricing ? t('dashboard.metrics.referenceCostNote') : undefined}>
           <BadgeDollarSign size={14} />
-          {t('monthly.estimated', {
+          {t('monthly.cost', {
             value: formatUSD(monthCost),
             suffix: monthCost === 0 ? t('monthly.noUsageSuffix') : '',
           })}
@@ -101,23 +96,24 @@ function computeMonthlyProgress(monthCost: number): number {
 
 function getMonthlyMarkers() {
   return [
-    { label: 'Plus $20', positionPercent: computeMonthlyProgress(20) * 100 },
-    { label: 'Pro100 $100', positionPercent: computeMonthlyProgress(100) * 100 },
-    { label: 'Pro200 $200', positionPercent: computeMonthlyProgress(200) * 100 },
-    { label: 'Cap $46.5K', positionPercent: computeMonthlyProgress(REFERENCE_CAP) * 100 },
+    { label: 'Plus $20', value: '$20', positionPercent: computeMonthlyProgress(20) * 100 },
+    { label: 'Pro100 $100', value: '$100', positionPercent: computeMonthlyProgress(100) * 100 },
+    { label: 'Pro200 $200', value: '$200', positionPercent: computeMonthlyProgress(200) * 100 },
+    { label: 'Cap $46.5K', value: '$46.5K', positionPercent: computeMonthlyProgress(REFERENCE_CAP) * 100 },
   ];
 }
 
-function Marker({ label, positionPercent }: { label: string; positionPercent: number }) {
+function Marker({ label, value, positionPercent }: { label: string; value: string; positionPercent: number }) {
   const left = `${clamp(positionPercent, 0, 100)}%`;
   return (
     <div
       className="absolute flex flex-col items-center"
-      style={{ left, transform: 'translateX(-50%)', top: '0.45rem' }}
+      style={{ left, top: '0.45rem' }}
       aria-hidden="true"
+      title={label}
     >
       <span className="h-2 w-px" style={{ backgroundColor: 'var(--text-tertiary)' }} />
-      <span className="mt-1 text-[10px] text-tertiary whitespace-nowrap">{label}</span>
+      <span className="absolute top-2 mt-1 text-[10px] text-tertiary whitespace-nowrap" style={{ transform: positionPercent === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{value}</span>
     </div>
   );
 }

@@ -108,12 +108,29 @@ impl CodexDashboardProvider {
         &self,
         now: DateTime<Utc>,
     ) -> anyhow::Result<Option<CodexDashboardSnapshot>> {
+        let mut dashboard = self.load_history_snapshot(now).await?;
+        if let Some(dashboard) = dashboard.as_mut() {
+            match CodexTaskBoardReader::new(&self.codex_root).load(now).await {
+                Ok(board) => dashboard.codex.snapshot.task_board = board,
+                Err(_) => dashboard
+                    .messages
+                    .push("Local task metadata is temporarily unavailable.".into()),
+            }
+        }
+        Ok(dashboard)
+    }
+
+    /// Complete history only; task metadata and official quota have independent lifetimes.
+    pub async fn load_history_snapshot(
+        &self,
+        now: DateTime<Utc>,
+    ) -> anyhow::Result<Option<CodexDashboardSnapshot>> {
         let (state_metadata, messages) = self.load_state_metadata().await?;
 
-        let rollout_index = index_codex_rollout_files(&self.codex_root).await;
+        let rollout_index = index_codex_rollout_files(&self.codex_root).await?;
         let transcript_reader = CodexTranscriptReader::new(&self.cache_dir);
         let (mut local_usage, summaries) = transcript_reader
-            .load_dashboard_inputs_from_index(&rollout_index, state_metadata, now)
+            .load_dashboard_inputs_from_index(&self.codex_root, &rollout_index, state_metadata, now)
             .await?;
         let Some(summaries) = summaries else {
             return Ok(None);
@@ -122,20 +139,14 @@ impl CodexDashboardProvider {
         let leadership_snapshot = build_leadership_snapshot(&summaries, now);
         let leadership_signal = build_codex_leadership_signal(&leadership_snapshot);
 
-        let task_board = CodexTaskBoardReader::new(&self.codex_root)
-            .load(now)
-            .await
-            .unwrap_or(None);
-
         if let Some(local) = local_usage.as_mut() {
             local.inference_performance = InferencePerformanceReader::new(&self.cache_dir)
                 .load_from_index(&rollout_index, now)
-                .await
-                .unwrap_or(None);
+                .await?;
         }
 
         Ok(Some(CodexDashboardSnapshot {
-            codex: build_codex_runtime_snapshot(local_usage, task_board, now),
+            codex: build_codex_runtime_snapshot(local_usage, None, now),
             leadership: leadership_signal,
             refreshed_at: now,
             messages,
@@ -164,6 +175,22 @@ impl CodexDashboardProvider {
                 Ok((HashMap::new(), vec![METADATA_WARNING.to_string()]))
             }
         }
+    }
+}
+
+pub fn empty_dashboard(now: DateTime<Utc>) -> CodexDashboardSnapshot {
+    CodexDashboardSnapshot {
+        codex: build_codex_runtime_snapshot(None, None, now),
+        leadership: CodexLeadershipSignal {
+            score: None,
+            evidence_coverage: 0.0,
+            active_day_count: 0,
+            period: LEADERSHIP_PERIOD_DEFAULT.into(),
+            model_version: DEFAULT_LEADERSHIP_MODEL_VERSION.into(),
+            report: None,
+        },
+        refreshed_at: now,
+        messages: vec![],
     }
 }
 
@@ -356,8 +383,8 @@ mod tests {
         assert!(snapshot.is_some());
         assert_eq!(
             crate::readers::common::rollout_io_counts(),
-            (1, 1),
-            "one refresh should enumerate the existing rollout root once and fingerprint its file once"
+            (1, 2),
+            "one shared enumeration plus per-file discovery and inference-cache fingerprints"
         );
     }
 
@@ -632,11 +659,13 @@ mod tests {
                 last_active_at: Some(now),
                 created_at: Some(now),
                 deltas: vec![UsageDelta {
+                    service_tier: None,
                     message_id: Some("turn-1".to_string()),
                     date: now,
                     tokens: TokenBreakdown {
                         input_tokens: 10,
                         cached_input_tokens: 0,
+                        cache_write_input_tokens: 0,
                         output_tokens: 5,
                         reasoning_output_tokens: 0,
                         total_tokens: 15,

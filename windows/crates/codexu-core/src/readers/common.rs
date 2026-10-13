@@ -7,9 +7,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Datelike, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::history_integrity::HistoryReadError;
 use crate::models::*;
 
 #[cfg(test)]
@@ -35,7 +36,7 @@ pub(crate) fn rollout_io_counts() -> (usize, usize) {
 pub const MAX_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 pub const READ_CHUNK_BYTES: usize = 64 * 1024;
-pub const CACHE_VERSION: i32 = 2;
+pub const CACHE_VERSION: i32 = 3;
 
 /// A fingerprint for a transcript file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,7 @@ pub struct CodexRolloutIndexEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageDelta {
     pub message_id: Option<String>,
+    pub service_tier: Option<String>,
     pub date: DateTime<Utc>,
     pub tokens: TokenBreakdown,
     pub model: Option<String>,
@@ -101,23 +103,26 @@ pub struct SessionSummary {
 }
 
 /// Enumerates all `.jsonl` files under `root`, sorted.
-pub async fn enumerate_jsonl_files(root: &Path) -> Vec<PathBuf> {
+pub async fn enumerate_jsonl_files(root: &Path) -> Result<Vec<PathBuf>, HistoryReadError> {
     #[cfg(test)]
     JSONL_ENUMERATION_COUNT.with(|count| count.set(count.get() + 1));
 
     let mut files = Vec::new();
     let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
-        let mut entries = match tokio::fs::read_dir(&dir).await {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        while let Ok(Some(entry)) = entries.next_entry().await {
+        let mut entries = tokio::fs::read_dir(&dir)
+            .await
+            .map_err(|_| HistoryReadError::Unavailable)?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|_| HistoryReadError::Unavailable)?
+        {
             let path = entry.path();
-            let file_type = match entry.file_type().await {
-                Ok(ft) => ft,
-                Err(_) => continue,
-            };
+            let file_type = entry
+                .file_type()
+                .await
+                .map_err(|_| HistoryReadError::Unavailable)?;
             if file_type.is_dir() {
                 if !path
                     .file_name()
@@ -134,7 +139,7 @@ pub async fn enumerate_jsonl_files(root: &Path) -> Vec<PathBuf> {
         }
     }
     files.sort();
-    files
+    Ok(files)
 }
 
 /// Builds a file fingerprint from filesystem metadata.
@@ -152,14 +157,25 @@ pub async fn fingerprint_for(path: &Path) -> Option<FileFingerprint> {
 }
 
 /// Enumerates and fingerprints the live and archived Codex rollouts once.
-pub async fn index_codex_rollout_files(codex_root: &Path) -> Vec<CodexRolloutIndexEntry> {
+pub async fn index_codex_rollout_files(
+    codex_root: &Path,
+) -> Result<Vec<CodexRolloutIndexEntry>, HistoryReadError> {
+    let root_metadata = tokio::fs::metadata(codex_root)
+        .await
+        .map_err(|_| HistoryReadError::Unavailable)?;
+    if !root_metadata.is_dir() {
+        return Err(HistoryReadError::Unavailable);
+    }
     let mut paths = Vec::new();
     for root in [
         codex_root.join("archived_sessions"),
         codex_root.join("sessions"),
     ] {
-        if tokio::fs::try_exists(&root).await.unwrap_or(false) {
-            paths.extend(enumerate_jsonl_files(&root).await);
+        if tokio::fs::try_exists(&root)
+            .await
+            .map_err(|_| HistoryReadError::Unavailable)?
+        {
+            paths.extend(enumerate_jsonl_files(&root).await?);
         }
     }
     paths.sort();
@@ -167,14 +183,26 @@ pub async fn index_codex_rollout_files(codex_root: &Path) -> Vec<CodexRolloutInd
 
     let mut entries = Vec::with_capacity(paths.len());
     for path in paths {
-        let fingerprint = fingerprint_for(&path).await;
+        let fingerprint = Some(
+            fingerprint_for(&path)
+                .await
+                .ok_or(HistoryReadError::Unavailable)?,
+        );
         entries.push(CodexRolloutIndexEntry { path, fingerprint });
     }
-    entries
+    Ok(entries)
 }
 
 /// Aggregates a collection of session summaries into `LocalUsage`.
 pub fn make_local_usage(summaries: Vec<SessionSummary>, now: DateTime<Utc>) -> Option<LocalUsage> {
+    make_local_usage_with_timezone(summaries, now, crate::StatisticsTimeZone::Local)
+}
+
+pub fn make_local_usage_with_timezone(
+    summaries: Vec<SessionSummary>,
+    now: DateTime<Utc>,
+    statistics: crate::StatisticsTimeZone,
+) -> Option<LocalUsage> {
     let mut unique_deltas: Vec<UsageDelta> = Vec::new();
     let mut seen_message_ids = HashSet::new();
     for delta in summaries.iter().flat_map(|s| s.deltas.iter()) {
@@ -193,14 +221,10 @@ pub fn make_local_usage(summaries: Vec<SessionSummary>, now: DateTime<Utc>) -> O
 
     unique_deltas.sort_by_key(|a| a.date);
 
-    let day_start = Utc
-        .with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
-        .unwrap();
-    let seven_day_start = day_start - chrono::Duration::days(6);
-    let previous_seven_day_start = day_start - chrono::Duration::days(13);
-    let month_start = Utc
-        .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
-        .unwrap();
+    let day_start = statistics.day_start(now);
+    let seven_day_start = statistics.days_before_start(now, 6);
+    let previous_seven_day_start = statistics.days_before_start(now, 13);
+    let month_start = statistics.month_start(now);
 
     let mut today = PricedTokenUsage::ZERO;
     let mut seven_day = PricedTokenUsage::ZERO;
@@ -211,7 +235,11 @@ pub fn make_local_usage(summaries: Vec<SessionSummary>, now: DateTime<Utc>) -> O
     let mut projects: HashMap<String, ProjectAccumulator> = HashMap::new();
 
     for delta in &unique_deltas {
-        let cost = estimated_cost_usd(&delta.tokens, delta.model.as_deref());
+        let cost = crate::model_pricing::estimate(
+            &delta.tokens,
+            delta.model.as_deref(),
+            delta.service_tier.as_deref(),
+        );
         lifetime.add_tokens(&delta.tokens, cost);
         if delta.date >= month_start {
             month.add_tokens(&delta.tokens, cost);
@@ -226,17 +254,8 @@ pub fn make_local_usage(summaries: Vec<SessionSummary>, now: DateTime<Utc>) -> O
             today.add_tokens(&delta.tokens, cost);
         }
 
-        let bucket_date = Utc
-            .with_ymd_and_hms(
-                delta.date.year(),
-                delta.date.month(),
-                delta.date.day(),
-                0,
-                0,
-                0,
-            )
-            .unwrap();
-        let key = bucket_date.format("%Y-%m-%d").to_string();
+        let bucket_date = statistics.day_start(delta.date);
+        let key = statistics.day_key(delta.date);
         let entry = daily_usage
             .entry(key)
             .or_insert_with(|| (bucket_date, PricedTokenUsage::ZERO));
@@ -253,11 +272,18 @@ pub fn make_local_usage(summaries: Vec<SessionSummary>, now: DateTime<Utc>) -> O
                 path: project_path.clone(),
                 ..Default::default()
             });
-        acc.add(delta, cost);
+        acc.add(delta, cost.usd);
     }
 
-    let daily_buckets = make_seven_day_buckets(&daily_usage, now);
-    let usage_trend = make_usage_trend(&daily_usage, &seven_day, &previous_seven_day, &month, now);
+    let daily_buckets = make_seven_day_buckets(&daily_usage, now, statistics);
+    let usage_trend = make_usage_trend(
+        &daily_usage,
+        &seven_day,
+        &previous_seven_day,
+        &month,
+        now,
+        statistics,
+    );
 
     let detailed = DetailedUsage {
         today: today.clone(),
@@ -330,18 +356,15 @@ pub fn make_local_usage(summaries: Vec<SessionSummary>, now: DateTime<Utc>) -> O
 fn make_seven_day_buckets(
     daily_usage: &HashMap<String, (DateTime<Utc>, PricedTokenUsage)>,
     now: DateTime<Utc>,
+    statistics: crate::StatisticsTimeZone,
 ) -> Vec<DailyTokenBucket> {
-    let start = now - chrono::Duration::days(6);
     (0..7)
         .map(|offset| {
-            let date = start + chrono::Duration::days(offset);
-            let date = Utc
-                .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
-                .unwrap();
-            let key = date.format("%Y-%m-%d").to_string();
+            let date = statistics.days_before_start(now, 6 - offset);
+            let key = statistics.day_key(date);
             DailyTokenBucket {
                 id: key.clone(),
-                label: date.format("%a").to_string(),
+                label: statistics.date(date).format("%a").to_string(),
                 tokens: daily_usage
                     .get(&key)
                     .map(|(_, u)| u.tokens.visible_total_tokens())
@@ -357,17 +380,14 @@ fn make_usage_trend(
     previous_seven_day: &PricedTokenUsage,
     month: &PricedTokenUsage,
     now: DateTime<Utc>,
+    statistics: crate::StatisticsTimeZone,
 ) -> UsageTrend {
-    let start = now - chrono::Duration::days(179);
     let mut buckets = Vec::new();
     let mut heatmap_days = Vec::new();
 
     for offset in 0..180 {
-        let date = start + chrono::Duration::days(offset);
-        let date = Utc
-            .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
-            .unwrap();
-        let key = date.format("%Y-%m-%d").to_string();
+        let date = statistics.days_before_start(now, 179 - offset);
+        let key = statistics.day_key(date);
         let usage = daily_usage
             .get(&key)
             .map(|(_, u)| u.clone())
@@ -379,7 +399,7 @@ fn make_usage_trend(
             source_quality: UsageSourceQuality::Detailed,
         });
         heatmap_days.push(UsageHeatmapDay {
-            id: date.format("%Y-%m-%d").to_string(),
+            id: statistics.day_key(date),
             date,
             usage: if usage.tokens.visible_total_tokens() > 0 {
                 Some(usage)
@@ -425,7 +445,10 @@ fn make_usage_trend(
         summary,
         model_trends: None,
         month: month.clone(),
-        projected_month_cost_usd: projected_month_cost(month.estimated_cost_usd, now),
+        projected_month_cost_usd: projected_month_cost(
+            month.estimated_cost_usd,
+            statistics.date(now),
+        ),
         active_day_count,
         source_quality: UsageSourceQuality::Detailed,
     }
@@ -446,12 +469,12 @@ fn make_heatmap_thresholds(tokens: Vec<i64>) -> Vec<i64> {
     ]
 }
 
-fn projected_month_cost(month_cost: f64, now: DateTime<Utc>) -> Option<f64> {
+fn projected_month_cost(month_cost: f64, now: chrono::NaiveDate) -> Option<f64> {
     let day = now.day();
     let days_in_month = match now.month() {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         2 => {
-            if now.year() % 4 == 0 {
+            if now.year() % 4 == 0 && (now.year() % 100 != 0 || now.year() % 400 == 0) {
                 29
             } else {
                 28
@@ -563,45 +586,6 @@ pub fn truncate_title(title: &str) -> String {
 
 /// Estimates USD cost from a token breakdown and an optional model name.
 ///
-/// Supports Claude and OpenAI/Codex model families with approximate list prices.
-/// Prices are per-million-tokens and are best-effort; update them when official
-/// pricing changes. When the model is unknown the cost is zero.
-pub fn estimated_cost_usd(tokens: &TokenBreakdown, model: Option<&str>) -> f64 {
-    let model_lower = model.map(|m| m.to_lowercase());
-    let m = model_lower.as_deref();
-    let price = if m == Some("claude-opus") || m.map(|s| s.contains("opus")).unwrap_or(false) {
-        Some((15.0, 1.5, 75.0))
-    } else if m == Some("claude-sonnet") || m.map(|s| s.contains("sonnet")).unwrap_or(false) {
-        Some((3.0, 0.3, 15.0))
-    } else if m == Some("claude-haiku") || m.map(|s| s.contains("haiku")).unwrap_or(false) {
-        Some((0.8, 0.08, 4.0))
-    } else if m.map(|s| s.contains("gpt-5.5")).unwrap_or(false) {
-        // Approximate higher-tier GPT-5.5 pricing.
-        Some((5.0, 1.25, 20.0))
-    } else if m.map(|s| s.contains("gpt-5")).unwrap_or(false) {
-        // Approximate GPT-5.4 / base GPT-5 pricing.
-        Some((2.5, 0.625, 10.0))
-    } else if m.map(|s| s.contains("gpt-4o")).unwrap_or(false) {
-        Some((2.5, 1.25, 10.0))
-    } else if m.map(|s| s.contains("gpt-4")).unwrap_or(false) {
-        Some((10.0, 5.0, 30.0))
-    } else if m
-        .map(|s| s.contains("gpt-3.5") || s.contains("gpt-35"))
-        .unwrap_or(false)
-    {
-        Some((0.5, 0.25, 1.5))
-    } else {
-        None
-    };
-    let Some((input_price, cached_price, output_price)) = price else {
-        return 0.0;
-    };
-    let uncached_cost = tokens.uncached_input_tokens() as f64 / 1_000_000.0 * input_price;
-    let cached_cost = tokens.billable_cached_input_tokens() as f64 / 1_000_000.0 * cached_price;
-    let output_cost = tokens.output_tokens.max(0) as f64 / 1_000_000.0 * output_price;
-    uncached_cost + cached_cost + output_cost
-}
-
 #[derive(Debug, Default)]
 struct ProjectAccumulator {
     path: String,

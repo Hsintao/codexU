@@ -98,7 +98,7 @@ impl ClaudeCodeTranscriptReader {
             return Ok(None);
         }
 
-        let files = enumerate_jsonl_files(projects_root).await;
+        let files = enumerate_jsonl_files(projects_root).await?;
         if files.is_empty() {
             return Ok(None);
         }
@@ -345,6 +345,7 @@ fn parse_usage(usage: &serde_json::Value) -> Option<TokenBreakdown> {
     Some(TokenBreakdown {
         input_tokens: input + cache_creation + cache_read,
         cached_input_tokens: cache_creation + cache_read,
+        cache_write_input_tokens: 0,
         output_tokens: output,
         reasoning_output_tokens: reasoning,
         total_tokens: total,
@@ -419,6 +420,7 @@ fn make_local_usage_from_claude(
                 .deltas
                 .into_iter()
                 .map(|d| UsageDelta {
+                    service_tier: None,
                     message_id: d.message_id,
                     date: d.date,
                     tokens: d.tokens,

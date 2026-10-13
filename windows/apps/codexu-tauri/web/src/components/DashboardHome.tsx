@@ -34,7 +34,7 @@ const DASHBOARD_TABS: Array<{ id: DashboardContentTab; title: string; titleKey: 
 
 const formatUSD = (value: unknown): string => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
-  return value.toFixed(2);
+  return value.toFixed(Math.abs(value) >= 1_000 ? 0 : 2);
 };
 
 export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, onQuotaRefresh }: DashboardHomeProps) {
@@ -43,6 +43,8 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
   const signal = leadershipSignal ?? null;
   const detailed = usage?.detailed_usage ?? null;
   const hasUsage = usage !== null;
+  const costNote = t('dashboard.metrics.costNote');
+  const referenceCostNote = `${costNote} · ${t('dashboard.metrics.referenceCostNote')}`;
 
   const [activeDashboardTab, setActiveDashboardTab] = useState<DashboardContentTab>('tasks');
   const tabRefs = useRef<Record<DashboardContentTab, HTMLButtonElement | null>>({
@@ -98,9 +100,10 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.today_tokens ?? null : null)}
             subValue={
               detailed
-                ? t('dashboard.metrics.estimated', { value: formatUSD(detailed.today.estimated_cost_usd) })
+                ? t('dashboard.metrics.cost', { value: formatUSD(detailed.today.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
+            subValueTitle={detailed ? (detailed.today.uses_reference_pricing ? referenceCostNote : costNote) : undefined}
             icon={<Activity size={16} />}
             compact
             accent="primary"
@@ -110,9 +113,10 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.seven_day_tokens ?? null : null)}
             subValue={
               detailed
-                ? t('dashboard.metrics.estimated', { value: formatUSD(detailed.seven_day.estimated_cost_usd) })
+                ? t('dashboard.metrics.cost', { value: formatUSD(detailed.seven_day.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
+            subValueTitle={detailed ? (detailed.seven_day.uses_reference_pricing ? referenceCostNote : costNote) : undefined}
             icon={<Calendar size={16} />}
             compact
             accent="secondary"
@@ -122,9 +126,10 @@ export function DashboardHome({ snapshot, quotaSourceLabel, leadershipSignal, on
             value={formatQuantity(hasUsage ? usage?.lifetime_tokens ?? null : null)}
             subValue={
               detailed
-                ? t('dashboard.metrics.estimated', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })
+                ? t('dashboard.metrics.cost', { value: formatUSD(detailed.lifetime.estimated_cost_usd) })
                 : t('dashboard.metrics.recordInsufficient')
             }
+            subValueTitle={detailed ? (detailed.lifetime.uses_reference_pricing ? referenceCostNote : costNote) : undefined}
             icon={<TrendingUp size={16} />}
             compact
             accent="tertiary"
