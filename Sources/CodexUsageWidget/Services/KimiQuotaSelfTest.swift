@@ -2,7 +2,7 @@ import Foundation
 
 /// Fixture-driven coverage for the Kimi runtime's quota path.
 ///
-/// Fixtures use an injected transport or a loopback HTTP server; the self-test
+/// Fixtures use a loopback HTTP server; the self-test
 /// never touches the real Kimi API or the user's live credential.
 enum KimiQuotaSelfTest {
     static func run() -> Bool {
@@ -13,10 +13,7 @@ enum KimiQuotaSelfTest {
         func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
             if !condition() { failures.append(message) }
         }
-        let credentialStore = KimiCredentialStore(cache: KimiCredentialCache(), execute: { _ in
-            expect(false, "credential-only fixtures must not issue OAuth requests")
-            return .failure(.init(message: "unexpected OAuth request", isTimeout: false))
-        })
+        let credentialStore = KimiCredentialStore()
 
         do {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
@@ -173,20 +170,20 @@ enum KimiQuotaSelfTest {
                 failures.append("a fresh local credential must resolve: \(failure.message)")
             }
 
-            // -- 10. An expired token without a refresh token must fail clearly --
+            // -- 10. An expired CLI token must not be refreshed by codexU --
             let pastExpiry = Int(Date().addingTimeInterval(-3_600).timeIntervalSince1970)
             let expiredCredential = """
             {"access_token": "eyJhbGciOiJFUzI1NiJ9.eyJjbGllbnRfaWQiOiJ0ZXN0LWNsaWVudCJ9.sig",
-             "expires_at": \(pastExpiry), "scope": "kimi-code"}
+             "refresh_token": "must-not-be-used", "expires_at": \(pastExpiry), "scope": "kimi-code"}
             """
             try Data(expiredCredential.utf8).write(to: credentialDirectory.appendingPathComponent("kimi-code.json"))
             var expiredMessages: [String] = []
             switch credentialStore.resolveCredential(context: context, messages: &expiredMessages) {
             case .success:
-                failures.append("an expired token without a refresh token must not resolve")
+                failures.append("an expired Kimi Code token must not resolve")
             case .failure(let failure):
-                expect(failure.message.contains("过期"),
-                       "an expired credential must explain that it expired")
+                expect(failure.message.contains("过期") && failure.message.contains("Kimi Code"),
+                       "an expired credential must direct the user to refresh Kimi Code")
             }
 
             // -- 11. Malformed credential file must be reported, not silently ignored --
@@ -234,8 +231,6 @@ enum KimiQuotaSelfTest {
                    && blankedSnapshot.snapshot.sevenDayQuota == nil
                    && blankedSnapshot.snapshot.monthlyQuota == nil,
                    "a missing credential must not fabricate quota windows")
-
-            try runOAuthScenario(root: root, expect: expect)
 
             // -- 13. End to end against a stub server: quota, then 401, then 404 --
             let stub = try KimiStubServer()
@@ -356,142 +351,6 @@ enum KimiQuotaSelfTest {
                "the local slice must not claim a successful quota read")
         expect(snapshot.snapshot.messages.contains(where: { $0.contains(".kimi-code") }),
                "the local slice must name the sessions directory it looked for")
-    }
-
-    private static func runOAuthScenario(
-        root: URL,
-        expect: @escaping (@autoclosure () -> Bool, String) -> Void
-    ) throws {
-        let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let home = root.appendingPathComponent("oauth-home", isDirectory: true)
-        let directory = home.appendingPathComponent(".kimi-code/credentials", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appendingPathComponent("kimi-code.json")
-        let original = Data(#"{"access_token":"access-0","refresh_token":"refresh+0&=","expires_at":1999999900,"client_id":"test-client","scope":"kimi-code","token_type":"Bearer"}"#.utf8)
-        try original.write(to: file)
-
-        func context(_ home: URL, seconds: TimeInterval = 0, key: String? = nil, error: String? = nil) -> RuntimeLoadContext {
-            let date = now.addingTimeInterval(seconds)
-            return RuntimeLoadContext(now: date, homeDirectory: home, cacheDirectory: root.appendingPathComponent("oauth-cache"),
-                                      statistics: StatisticsContext(preference: .default, now: date),
-                                      kimiAPIKey: key, kimiCredentialError: error)
-        }
-        func token(_ outcome: KimiCredentialResolution, _ message: String) -> String? {
-            switch outcome {
-            case .success(let credential):
-                return credential.accessToken
-            case .failure(let failure):
-                expect(false, "\(message): \(failure.message)")
-                return nil
-            }
-        }
-
-        let cache = KimiCredentialCache()
-        var requests: [URLRequest] = []
-        let execute: (URLRequest) -> Result<KimiSynchronousRequest.Response, KimiSynchronousRequest.Failure> = { request in
-            requests.append(request)
-            let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
-            let fields = URLComponents(string: "?" + body)?.queryItems ?? []
-            func field(_ name: String) -> String? { fields.first { $0.name == name }?.value }
-            expect(request.url?.absoluteString == "https://auth.kimi.com/api/oauth/token", "refresh must use the official OAuth endpoint")
-            expect(request.httpMethod == "POST", "refresh must use a POST grant")
-            expect(request.value(forHTTPHeaderField: "Content-Type") == "application/x-www-form-urlencoded", "refresh must send form data")
-            expect(field("grant_type") == "refresh_token", "refresh must send the refresh grant")
-            expect(field("client_id") == "test-client", "the cached opaque token must retain the original client ID")
-            let response: String
-            switch field("refresh_token") {
-            case "refresh+0&=":
-                response = #"{"access_token":"access-1","refresh_token":"refresh-1","expires_in":90,"scope":"kimi-code","token_type":"Bearer"}"#
-            case "refresh-1":
-                response = #"{"access_token":"access-2","refresh_token":"refresh-2","expires_in":900,"scope":"kimi-code","token_type":"Bearer"}"#
-            case "refresh-b0":
-                response = #"{"access_token":"access-b1","refresh_token":"refresh-b1","expires_in":900,"scope":"kimi-code","token_type":"Bearer"}"#
-            default:
-                expect(false, "refresh must use a known, correctly form-encoded token")
-                return .success(.init(status: 400, body: Data(#"{"error":"invalid_grant"}"#.utf8)))
-            }
-            return .success(.init(status: 200, body: Data(response.utf8)))
-        }
-        let store = KimiCredentialStore(cache: cache, execute: execute)
-        var messages: [String] = []
-        expect(token(store.resolveCredential(context: context(home), messages: &messages), "initial refresh") == "access-1",
-               "an expired source credential must refresh")
-        let nextStore = KimiCredentialStore(cache: cache, execute: execute)
-        expect(token(nextStore.resolveCredential(context: context(home, seconds: 20), messages: &messages), "cached resolve") == "access-1",
-               "another store sharing the cache must reuse the refreshed access token")
-        expect(requests.count == 1, "a still-valid cached access token must not issue another refresh")
-        expect(token(nextStore.resolveCredential(context: context(home, seconds: 61), messages: &messages), "rotated refresh") == "access-2",
-               "expiry must refresh using the retained rotated refresh token")
-        expect(requests.count == 2, "the refreshed expires_in must control the next refresh time")
-        let unchanged = try Data(contentsOf: file)
-        expect(unchanged == original, "OAuth refresh must never rewrite the CLI credential file")
-
-        // The saved key and Keychain failure are resolved before any CLI token.
-        let callsBeforeManual = requests.count
-        switch nextStore.resolveCredential(context: context(home, seconds: 62, key: "sk-kimi-manual"), messages: &messages) {
-        case .success(let credential):
-            expect(credential.accessToken == "sk-kimi-manual" && !credential.isLocallyStored,
-                   "a manual key must never reuse an OAuth cache entry")
-        case .failure:
-            expect(false, "a manual key must resolve independently of OAuth")
-        }
-        switch nextStore.resolveCredential(context: context(home, key: "sk-kimi-manual", error: "Keychain read failed"), messages: &messages) {
-        case .success:
-            expect(false, "a Keychain error must not select a manual or CLI credential")
-        case .failure(let failure):
-            expect(failure.message == "Keychain read failed", "a Keychain error must be returned to the provider")
-        }
-        expect(requests.count == callsBeforeManual, "manual keys and credential errors must not issue OAuth requests")
-
-        // Identical bytes at a different source path must not reuse this account cache.
-        let otherHome = root.appendingPathComponent("other-oauth-home", isDirectory: true)
-        let otherDirectory = otherHome.appendingPathComponent(".kimi-code/credentials", isDirectory: true)
-        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
-        try original.write(to: otherDirectory.appendingPathComponent("kimi-code.json"))
-        expect(token(nextStore.resolveCredential(context: context(otherHome, seconds: 62), messages: &messages), "other path") == "access-1",
-               "cached credentials must be bound to the source path")
-        expect(requests.count == callsBeforeManual + 1, "a different source path must resolve its own credential")
-
-        let changed = Data(#"{"access_token":"access-b0","refresh_token":"refresh-b0","expires_at":1999999900,"client_id":"test-client","scope":"kimi-code","token_type":"Bearer"}"#.utf8)
-        try changed.write(to: otherDirectory.appendingPathComponent("kimi-code.json"))
-        expect(token(nextStore.resolveCredential(context: context(otherHome, seconds: 63), messages: &messages), "changed account") == "access-b1",
-               "changing the on-disk account must invalidate the old cached token")
-        let callsAfterAccountChange = requests.count
-        expect(callsAfterAccountChange == callsBeforeManual + 2, "a new account must refresh its own token")
-        let otherFile = otherDirectory.appendingPathComponent("kimi-code.json")
-        try FileManager.default.removeItem(at: otherFile)
-        switch nextStore.resolveCredential(context: context(otherHome, seconds: 64), messages: &messages) {
-        case .success:
-            expect(false, "a removed credential must not resolve from the cache")
-        case .failure:
-            break
-        }
-        try changed.write(to: otherFile)
-        expect(token(nextStore.resolveCredential(context: context(otherHome, seconds: 65), messages: &messages), "restored account") == "access-b1",
-               "a restored credential must resolve again")
-        expect(requests.count == callsAfterAccountChange + 1, "removing the source must invalidate its cached identity")
-
-        let independent = KimiCredentialStore(cache: KimiCredentialCache(), execute: execute)
-        expect(token(independent.resolveCredential(context: context(home), messages: &messages), "independent cache") == "access-1",
-               "an injected cache must be independent of other stores")
-        expect(requests.count == callsAfterAccountChange + 2, "isolated caches must not consult shared live state")
-
-        // An incomplete refreshed token cannot safely enter the memory cache.
-        for malformed in [
-            #"{"access_token":"new-access","expires_in":900}"#,
-            #"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
-            #"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":0}"#
-        ] {
-            let malformedStore = KimiCredentialStore(cache: KimiCredentialCache(), execute: { _ in
-                .success(.init(status: 200, body: Data(malformed.utf8)))
-            })
-            switch malformedStore.resolveCredential(context: context(home), messages: &messages) {
-            case .success:
-                expect(false, "a refresh without a rotated token and positive lifetime must fail")
-            case .failure:
-                break
-            }
-        }
     }
 
     private static func jsonObject(_ text: String) throws -> [String: Any] {

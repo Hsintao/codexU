@@ -30,6 +30,13 @@ test('builds Usage around local source quality, token layers, and the existing t
   assert.match(trendChart, /daily_average_tokens/);
   assert.match(trendChart, /change_percent/);
 
+  assert.match(trendChart, /const RANGES = \[\s*\{ label: '7D', days: 7 \}/);
+  assert.match(
+    trendChart,
+    /\{ label: '7D', days: 7 \},\s*\{ label: '30D', days: 30 \},\s*\{ label: '90D', days: 90 \},\s*\{ label: '180D', days: 180 \},/,
+  );
+  assert.match(trendChart, /useState\(7\)/);
+
   assert.match(heatmap, /heatmap_weeks/);
   assert.match(heatmap, /heatmap_thresholds/);
   assert.match(heatmap, /is_future/);

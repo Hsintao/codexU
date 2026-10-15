@@ -166,50 +166,16 @@ enum KimiUsageOutcome {
     case failure(KimiUsageFailure)
 }
 
-final class KimiCredentialCache {
-    static let shared = KimiCredentialCache()
-
-    // One active source bounds retained secrets; the lock also coalesces refreshes
-    // across provider instances while the CLI remains the sole file writer.
-    fileprivate let lock = NSLock()
-    fileprivate var entry: Entry?
-
-    fileprivate struct Entry {
-        let sourceURL: URL
-        let original: KimiCredentialStore.StoredCredential
-        let refreshed: KimiCredentialStore.StoredCredential
-    }
-}
-
-/// Resolves a usable Kimi credential, refreshing the locally stored access
-/// token when it has expired. The store never writes back into `~/.kimi-code`,
-/// so the Kimi CLI remains the sole owner of its own credential file.
+/// Resolves a usable Kimi credential from the file owned by Kimi Code.
+///
+/// CodexU deliberately does not refresh OAuth credentials from this file. Kimi
+/// Code owns the credential lifecycle, including refresh-token rotation and
+/// cross-process coordination. This reader only uses an access token while it
+/// is valid and asks the user to refresh or log in again through Kimi Code once
+/// it expires.
 struct KimiCredentialStore {
     static let defaultBaseURL = "https://api.kimi.com/coding/v1"
-    private static let oauthHost = "https://auth.kimi.com"
-    /// The OAuth token endpoint accepts a form-encoded refresh grant. The
-    /// `/v1/oauth/token` path used by the workload-identity flow is not served.
-    private static let tokenEndpoint = "/api/oauth/token"
-    /// The access token is short-lived (900s). Refresh slightly early to avoid
-    /// racing the expiry while a request is in flight.
-    private static let refreshLeewaySeconds: TimeInterval = 30
     private static let maximumCredentialBytes = 64 * 1_024
-
-    private let fileManager = FileManager.default
-    private let cache: KimiCredentialCache
-    private let execute: (URLRequest) -> Result<KimiSynchronousRequest.Response, KimiSynchronousRequest.Failure>
-
-    init() {
-        self.init(cache: .shared, execute: KimiSynchronousRequest.perform)
-    }
-
-    init(
-        cache: KimiCredentialCache,
-        execute: @escaping (URLRequest) -> Result<KimiSynchronousRequest.Response, KimiSynchronousRequest.Failure> = KimiSynchronousRequest.perform
-    ) {
-        self.cache = cache
-        self.execute = execute
-    }
 
     func resolveCredential(context: RuntimeLoadContext, messages: inout [String]) -> KimiCredentialResolution {
         if let error = context.kimiCredentialError {
@@ -220,52 +186,33 @@ struct KimiCredentialStore {
             return .success(KimiCredential(accessToken: manualKey, baseURL: Self.defaultBaseURL, isLocallyStored: false))
         }
 
-        cache.lock.lock()
-        defer { cache.lock.unlock() }
         let sourceURL = context.homeDirectory
             .appendingPathComponent(".kimi-code", isDirectory: true)
             .appendingPathComponent("credentials", isDirectory: true)
             .appendingPathComponent("kimi-code.json")
             .standardizedFileURL
         guard let stored = readStoredCredential(url: sourceURL, messages: &messages) else {
-            cache.entry = nil
             return .failure(KimiCredentialFailure(
                 message: "未找到 Kimi Code 凭证；请登录 Kimi Code，或在设置中填写 API Key"
             ))
         }
 
-        if cache.entry?.sourceURL != sourceURL || cache.entry?.original != stored {
-            cache.entry = nil
-        }
-        let active = cache.entry?.refreshed ?? stored
-        if !isExpired(active, now: context.now) {
+        if !isExpired(stored, now: context.now) {
             return .success(KimiCredential(
-                accessToken: active.accessToken,
+                accessToken: stored.accessToken,
                 baseURL: Self.defaultBaseURL,
                 isLocallyStored: true
             ))
         }
 
-        guard let refreshToken = active.refreshToken, !refreshToken.isEmpty else {
-            return .failure(KimiCredentialFailure(
-                message: "Kimi Code 登录已过期，请重新登录 Kimi Code，或在设置中填写 API Key"
-            ))
-        }
-
-        switch refresh(stored: active, refreshToken: refreshToken, context: context, messages: &messages) {
-        case .success(let refreshed):
-            cache.entry = .init(sourceURL: sourceURL, original: stored, refreshed: refreshed)
-            return .success(KimiCredential(accessToken: refreshed.accessToken, baseURL: Self.defaultBaseURL, isLocallyStored: true))
-        case .failure(let failure):
-            return .failure(failure)
-        }
+        return .failure(KimiCredentialFailure(
+            message: "Kimi Code 登录已过期，请先在 Kimi Code 中刷新或重新登录；CodexU 不会刷新 Kimi Code 凭证"
+        ))
     }
 
-    fileprivate struct StoredCredential: Equatable {
+    private struct StoredCredential {
         let accessToken: String
-        let refreshToken: String?
         let expiresAt: Date?
-        let clientID: String?
     }
 
     private func readStoredCredential(
@@ -293,100 +240,17 @@ struct KimiCredentialStore {
 
         return StoredCredential(
             accessToken: accessToken,
-            refreshToken: kimiStringValue(object["refresh_token"]) ?? kimiStringValue(object["refreshToken"]),
-            expiresAt: kimiDateValue(object["expires_at"]) ?? kimiDateValue(object["expiresAt"]),
-            clientID: kimiClientID(from: accessToken) ?? kimiStringValue(object["client_id"])
+            expiresAt: kimiDateValue(object["expires_at"]) ?? kimiDateValue(object["expiresAt"])
         )
     }
 
     private func isExpired(_ credential: StoredCredential, now: Date) -> Bool {
         guard let expiresAt = credential.expiresAt else {
             // Without an expiry the token is assumed usable; a 401 will surface
-            // the real state instead of forcing an unnecessary refresh.
+            // the real state instead of inventing a local expiry.
             return false
         }
-        return now.addingTimeInterval(Self.refreshLeewaySeconds) >= expiresAt
-    }
-
-    /// The Kimi CLI embeds the OAuth client id in the access token payload, so
-    /// the refresh grant does not need any separately configured constant.
-    private func kimiClientID(from token: String) -> String? {
-        let parts = token.split(separator: ".")
-        guard parts.count > 1 else { return nil }
-        var payload = String(parts[1])
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        let remainder = payload.count % 4
-        if remainder > 0 {
-            payload += String(repeating: "=", count: 4 - remainder)
-        }
-        guard let data = Data(base64Encoded: payload),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let clientID = kimiStringValue(object["client_id"]) else {
-            return nil
-        }
-        return clientID
-    }
-
-    private func refresh(
-        stored: StoredCredential,
-        refreshToken: String,
-        context: RuntimeLoadContext,
-        messages: inout [String]
-    ) -> Result<StoredCredential, KimiCredentialFailure> {
-        guard let clientID = stored.clientID, !clientID.isEmpty else {
-            return .failure(KimiCredentialFailure(
-                message: "Kimi Code 登录已过期，且无法从凭证中确定客户端标识；请重新登录 Kimi Code"
-            ))
-        }
-
-        guard let url = URL(string: Self.oauthHost + Self.tokenEndpoint) else {
-            return .failure(KimiCredentialFailure(message: "Kimi 凭证刷新地址无效"))
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 8
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = KimiSynchronousRequest.formEncodedBody([
-            "grant_type": "refresh_token",
-            "refresh_token": refreshToken,
-            "client_id": clientID
-        ])
-
-        let result = execute(request)
-        switch result {
-        case .failure(let failure):
-            return .failure(KimiCredentialFailure(message: failure.message))
-        case .success(let response):
-            guard response.status == 200 else {
-                if response.status == 401 || response.status == 400 {
-                    return .failure(KimiCredentialFailure(
-                        message: "Kimi Code 登录已失效，请重新登录 Kimi Code，或在设置中填写 API Key"
-                    ))
-                }
-                messages.append("Kimi Code 凭证刷新失败（HTTP \(response.status)）")
-                return .failure(KimiCredentialFailure(
-                    message: "Kimi Code 凭证刷新失败（HTTP \(response.status)），请稍后重试或重新登录"
-                ))
-            }
-            guard let object = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any],
-                  let accessToken = kimiStringValue(object["access_token"]),
-                  let refreshedToken = kimiStringValue(object["refresh_token"]),
-                  let expiresIn = kimiDoubleValue(object["expires_in"]),
-                  expiresIn.isFinite, expiresIn > 0 else {
-                return .failure(KimiCredentialFailure(message: "Kimi Code 凭证刷新返回无法解析"))
-            }
-            // The refreshed token is held in memory only. Persisting it would
-            // race the Kimi CLI, which owns and rotates the credential file.
-            return .success(StoredCredential(
-                accessToken: accessToken,
-                refreshToken: refreshedToken,
-                expiresAt: context.now.addingTimeInterval(expiresIn),
-                clientID: clientID
-            ))
-        }
+        return now >= expiresAt
     }
 }
 
@@ -402,17 +266,6 @@ struct KimiSynchronousRequest {
     struct Failure: Error {
         let message: String
         let isTimeout: Bool
-    }
-
-    static func formEncodedBody(_ fields: [String: String]) -> Data? {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        let pairs = fields.map { key, value -> String in
-            let encodedKey = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
-            let encodedValue = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
-            return "\(encodedKey)=\(encodedValue)"
-        }
-        return Data(pairs.joined(separator: "&").utf8)
     }
 
     static func perform(_ request: URLRequest) -> Result<Response, Failure> {

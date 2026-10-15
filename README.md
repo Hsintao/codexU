@@ -76,8 +76,8 @@ Windows 版本是独立的 Tauri 桌面实现，当前发布包尚未由仓库�
 - Kimi 今日任务读取本机会话元数据，按所选统计时区显示今天的“最近活跃 / 待继续”：最近 2 小时有活动归为最近活跃，其余今日会话归为待继续；展示会话标题、工作区简称和活动时间，不据此判断执行或完成状态。今日没有会话显示“今日暂无会话”，读取失败保留上次结果并允许重试。
 - Codex 今日任务顶部按“模型 × 推理强度”展示本机实测散点图，并可在右上角切换今日（默认）、7 日均和 28 日均。横轴为所选窗口内完整调用耗时 P50、横线延伸到 P90，横轴上限为所有组合最大 P90 的 1.4 倍；纵轴为输出 tokens 除以完整调用耗时。今日气泡大小代表模型调用数，7/28 日气泡使用记录覆盖期内的日均调用数，避免周期长度放大气泡；它们都不是 Session、线程或工具调用数。样本会持久化到本机 Application Support，并从最近 28 天 rollout 回填，不记录 prompt、回复或路径。悬停气泡可查看总调用数、日均调用数、平均/P50/P90、有效吞吐、吞吐计算口径，以及 reasoning tokens 在全部输出中的数量和占比。该指标用于持续比较客观体感，不冒充 TTFT 或可见文本解码 TPS。
 - 任务卡片优先展示标题、工作区、事实时间和可信状态；可确定时显示 automation 下次运行时间，只有存在有效 Session Deep Link 的卡片才提供整卡点击、hover、手型和键盘焦点反馈。
-- Codex 用量趋势展示最近半年的每日 token 热力图和模型活动概览，概览包含当前范围内的用量最高模型、活跃日期数、活跃模型数和范围日均用量；Claude Code 暂不支持模型归因，保留原有近 7 日摘要。
-- 在 Codex 用量趋势下方展示按模型分色的时间序列面积图，默认显示最近 30 天，可切换最近 60/90/180 天；图中同时显示总用量虚线、近 7 日总量、日均和较前 7 日变化。默认显示 Top 8 模型并将其余模型合并为“其他模型”。纵轴可切换 Token 或 API 等效估算费用；模型没有独立价格时明确显示为按 GPT-5.5 价格折算的参考费用。粗略线程口径没有费用拆分时，费用模式会明确标记为不可用。
+- Codex 用量趋势展示最近半年的每日 token 热力图和模型活动概览，概览包含当前范围内的用量最高模型、活跃日期数、活跃模型数和范围日均用量；范围与模型面积图共用，默认最近 7 天，可切换最近 30/60/90/180 天；Claude Code 暂不支持模型归因，保留原有近 7 日摘要。
+- 在 Codex 用量趋势下方展示按模型分色的时间序列面积图，默认显示最近 7 天，可切换最近 30/60/90/180 天；图中同时显示总用量虚线、近 7 日总量、日均和较前 7 日变化。默认显示 Top 8 模型并将其余模型合并为“其他模型”。纵轴可切换 Token 或 API 等效估算费用；模型没有独立价格时明确显示为按 GPT-5.5 价格折算的参考费用。粗略线程口径没有费用拆分时，费用模式会明确标记为不可用。
 - 展示最近 7 天与全部项目排行，包含 token、估算价值、线程数和最近活跃时间。
 - 展示工具调用 TOP 列表和 Skill 使用 TOP 列表，帮助判断本地 Codex 工作结构。
 - 以标准 macOS 窗口运行，主窗口默认保持紧凑布局，也可在 820–1280pt 范围内调整宽度；增加宽度不会改变卡片顺序和信息结构，并会恢复上次窗口尺寸。支持 Dock、系统窗口控制、最小化和关闭主窗口后继续后台运行，关闭主窗口会隐藏 Dock 图标并保留菜单栏图标。
@@ -236,7 +236,7 @@ Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTI
 - Claude Code 历史 token：`~/.claude/projects/**/*.jsonl` 中 assistant message 的 `message.usage` 字段。
 - Claude Code 工具、Skill 和任务：transcript 中的 `tool_use.name` / 显式 Skill attribution，以及 `~/.claude/tasks/**/*.json`；Skill 路径缺失时按 Claude Code 的个人、项目、嵌套、插件和旧版 command 路径在当前文件系统中回退推断，无法确认时显示“当前未定位”。
 - Claude Code active 额度：可选读取 `~/Library/Caches/codexU/claude-code/statusline-snapshot.json`；缺失时 5 小时/7 日额度显示为 `--`。
-- Kimi 官方额度：读取 Kimi Coding Plan 的 `GET {base}/usages`（默认 `https://api.kimi.com/coding/v1`），映射 5 小时、7 日和月度窗口；凭证来自本机 `~/.kimi-code/credentials/kimi-code.json`（过期时用 refresh token 刷新，刷新结果只留在内存中，不回写 Kimi Code 的文件）或设置页手填的 Key。接口未返回的窗口保持隐藏，读取失败会保留上一次成功值并标记为过期。
+- Kimi 官方额度：读取 Kimi Coding Plan 的 `GET {base}/usages`（默认 `https://api.kimi.com/coding/v1`），映射 5 小时、7 日和月度窗口；凭证来自本机 `~/.kimi-code/credentials/kimi-code.json`（CodexU 只使用未过期的 access token，不主动刷新或回写 Kimi Code 凭证；过期时需先在 Kimi Code 更新登录状态）或设置页手填的 Key。接口未返回的窗口保持隐藏，读取失败会保留上一次成功值并标记为过期。
 - Kimi 今日任务：`~/.kimi-code/sessions/<workspace>/session_<id>/state.json` 中的 `title`、`workDir` 和 `updatedAt`；兼容 ISO 时间与毫秒时间戳，按会话 ID 去重，不解析对话正文，不提供 Codex Session 跳转。
 - Kimi 本机 token：`~/.kimi-code/sessions/**/agents/*/wire.jsonl` 中的 `usage.record` 事件，累加 `inputOther`（cache miss）、`inputCacheRead`（缓存命中）、`inputCacheCreation`（缓存创建）和 `output`；经 Kimi Code CLI 的全部提供商路由都计入并按模型拆分展示。缓存读取是长会话的绝对主体，占比可达九成以上。
 - Kimi 项目排行：按会话 `state.json` 中的 `cwd` 归因工作目录；未记录 cwd 的会话仍计入总量，但不会被包装成一个项目。

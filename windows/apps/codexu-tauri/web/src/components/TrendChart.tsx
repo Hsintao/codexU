@@ -17,6 +17,7 @@ interface TrendChartProps {
 }
 
 const RANGES = [
+  { label: '7D', days: 7 },
   { label: '30D', days: 30 },
   { label: '90D', days: 90 },
   { label: '180D', days: 180 },
@@ -24,7 +25,7 @@ const RANGES = [
 
 export function TrendChart({ trend }: TrendChartProps) {
   const { t } = useI18n();
-  const [range, setRange] = useState(30);
+  const [range, setRange] = useState(7);
 
   const data = useMemo(() => {
     if (!trend) return [];

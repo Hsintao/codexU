@@ -8576,8 +8576,8 @@ struct ModelUsageAreaChartCard: View {
 
     private var windowHelp: String {
         language.text(
-            "选择模型面积图的日期范围；数据最多可回溯半年。",
-            "Choose the model area chart range; data is available for up to six months."
+            "选择模型面积图与模型活动概览的日期范围；默认为最近 7 天，数据最多可回溯半年。",
+            "Choose the range for the model area chart and model activity overview; the default is the last 7 days, and data is available for up to six months."
         )
     }
 }

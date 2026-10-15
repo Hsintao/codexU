@@ -34,13 +34,13 @@ codexU reads:
 
 It should not upload local usage, transcript, task, thread, account, or path data to a third-party service. Claude Code transcript parsing must not store prompt text, assistant response text, tool arguments, or tool output.
 
-Manual Kimi keys are stored in the macOS Keychain. A legacy plaintext preference is deleted only after successful migration. Keychain failures are surfaced without silently switching to another account. Kimi log caches contain derived metadata, not conversation text or raw tool arguments. Refreshed OAuth credentials remain in process memory; codexU never rewrites the Kimi CLI credential file.
+Manual Kimi keys are stored in the macOS Keychain. A legacy plaintext preference is deleted only after successful migration. Keychain failures are surfaced without silently switching to another account. Kimi log caches contain derived metadata, not conversation text or raw tool arguments. The Kimi CLI owns its credential file; codexU reads it but never refreshes OAuth credentials or writes to it.
 
 ## Network Scope
 
 codexU is local-first. The update checker may request public GitHub Release metadata from `https://api.github.com/repos/shanggqm/codexU/releases` during automatic checks when enabled or when the user manually checks for updates.
 
-Kimi quota reads authenticate to `https://api.kimi.com/coding/v1/usages`. Expired CLI credentials may be refreshed at `https://auth.kimi.com/api/oauth/token`. These requests send authentication credentials only; local session usage, transcripts, paths and task data are never included.
+Kimi quota reads authenticate to `https://api.kimi.com/coding/v1/usages` using either a user-supplied API key or a still-valid Kimi Code access token. codexU does not call the OAuth token endpoint. If the local access token has expired, codexU asks the user to update or reauthenticate through Kimi Code. Quota requests send authentication credentials only; local session usage, transcripts, paths and task data are never included.
 
 Update requests must not include local usage, transcript, task, thread, account, path, prompt, response, tool argument, or tool output data. The update checker may send standard HTTPS headers such as `User-Agent` and `If-None-Match` for ETag caching.
 

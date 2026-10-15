@@ -27,6 +27,7 @@
 
 ## Unreleased
 
+- 用量趋势的模型活动概览与模型面积图新增最近 7 天范围，并设为默认；范围顺序为 7/30/60/90/180 天，Windows 端同步为 7D 默认。
 - Kimi 主 Agent 与 Subagent 的已结束区间纳入合并 AI 领导力；读取失败、元数据无效或超出有界处理预算时保留上次完整结果，不发布部分或静默截断的统计。
 - 领导力模型版本升至 1.4：历史索引与直读路径共用同一份 Kimi 区间，索引不可用时不会退回旧口径；缓存恢复按版本失效，分值、Agent 数与 AI 工时随 Kimi 证据并入而上移。
 - 共享价格表新增 Kimi K3 API 等效估价及 `kimi-code/kimi-k3` 别名，不代表订阅账单。
@@ -35,7 +36,7 @@
 
 - 新增 Kimi Runtime：主界面、菜单栏 Runtime 卡片、设置页展示开关和状态栏图标都可选择 Kimi，与 Codex、Claude Code 并列。
 - Kimi 额度读取 Kimi Coding Plan 官方 `GET /usages` 接口，映射 5 小时、7 日和月度窗口；接口未返回的窗口保持隐藏，读取失败保留上次成功值并标记过期，缺失数据不伪造成 0。
-- Kimi 支持设置页填写 `sk-kimi-xxx` API Key，保存在本机 Keychain 并迁移旧偏好；未填写时读取本机 `~/.kimi-code` 凭证。过期时用 refresh token 刷新，完整刷新结果只留在内存中，不回写 Kimi Code 文件。
+- Kimi 支持设置页填写 `sk-kimi-xxx` API Key，保存在本机 Keychain 并迁移旧偏好；未填写时读取本机 `~/.kimi-code` 凭证。CodexU 不主动刷新 Kimi CLI OAuth 凭证，过期时提示先在 Kimi Code 中刷新或重新登录，也不回写 Kimi Code 文件。
 - Kimi 新增本机 token 用量统计：读取 `~/.kimi-code/sessions/**/agents/*/wire.jsonl` 的 `usage.record` 事件，提供今日、7 日、月度、累计、每日趋势和热力图，与官方额度并列展示在同一张 Kimi 卡片。
 - Kimi 本机统计只累加 `usage.record`（`inputOther` / `inputCacheRead` / `inputCacheCreation` / `output`），显式排除 `token_counting.*` 上下文水位事件；经 Kimi Code CLI 的全部提供商路由都计入并按模型拆分，按会话文件缓存指纹增量重算。
 - Kimi 新增项目排行：从会话 `state.json` 的 `cwd` 归因到工作目录，按 token 排序，无 cwd 的会话不计入项目但仍计入总量。

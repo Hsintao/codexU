@@ -17,13 +17,14 @@ enum UsageTrendMetric: String, CaseIterable, Identifiable {
 }
 
 enum UsageTrendWindow: Int, CaseIterable, Identifiable, Equatable {
+    case sevenDays = 7
     case thirtyDays = 30
     case sixtyDays = 60
     case ninetyDays = 90
     case oneEightyDays = 180
 
     static let storageKey = "codexU.usageTrend.windowDays"
-    static let defaultWindow: UsageTrendWindow = .thirtyDays
+    static let defaultWindow: UsageTrendWindow = .sevenDays
 
     var id: Int { rawValue }
     var dayCount: Int { rawValue }
@@ -360,6 +361,42 @@ enum ModelUsageTrendSelfTest {
         expect(visibleWindowBuckets.count == 30, "thirty-day window should cap the visible date axis")
         expect(visibleWindowBuckets.first?.id == dateBuckets[1].id, "thirty-day window should exclude the oldest bucket")
         expect(visibleWindowBuckets.last?.id == dateBuckets[30].id, "window should exclude future buckets")
+
+        let sevenDayWindowBuckets = ModelUsageAreaSeriesBuilder.dateBuckets(
+            from: overallTrend,
+            window: .sevenDays,
+            referenceDate: dates[30]
+        )
+        expect(sevenDayWindowBuckets.count == 7, "seven-day window should cap the visible date axis at seven days")
+        expect(sevenDayWindowBuckets.first?.id == dateBuckets[24].id, "seven-day window should start seven days before the reference date")
+        expect(sevenDayWindowBuckets.last?.id == dateBuckets[30].id, "seven-day window should end on the reference date")
+
+        expect(UsageTrendWindow.allCases.first == .sevenDays, "seven-day range should list first in the range picker")
+        expect(UsageTrendWindow.defaultWindow == .sevenDays, "seven-day range should be the default trend window")
+        expect(UsageTrendWindow.allCases.map(\.dayCount) == [7, 30, 60, 90, 180], "range picker should offer ascending 7/30/60/90/180 days")
+
+        // Persistence gate: a fresh install and an explicit choice must both resolve predictably.
+        if let defaults = UserDefaults(suiteName: "codexU.usage-trend-self-test") {
+            defaults.removePersistentDomain(forName: "codexU.usage-trend-self-test")
+            expect(UsageTrendWindow.storedOrDefault(defaults: defaults) == .sevenDays, "an empty preference store should default to seven days")
+            UsageTrendWindow.ninetyDays.persist(defaults: defaults)
+            expect(UsageTrendWindow.storedOrDefault(defaults: defaults) == .ninetyDays, "an explicit range choice should survive a reload")
+            defaults.set(42, forKey: UsageTrendWindow.storageKey)
+            expect(UsageTrendWindow.storedOrDefault(defaults: defaults) == .sevenDays, "an unrecognized stored range should fall back to seven days")
+            defaults.removePersistentDomain(forName: "codexU.usage-trend-self-test")
+        } else {
+            failures.append("could not create an isolated defaults suite for the trend window")
+        }
+
+        let sevenDaySeries = ModelUsageAreaSeriesBuilder.build(from: overallTrend, window: .sevenDays)
+        expect(sevenDaySeries.allSatisfy { $0.dayBuckets.count == 7 }, "seven-day window should give every series a seven-day axis")
+        // Every emitted series (top eight plus the aggregate) must sum to the overall seven-day total.
+        let sevenDaySeriesTokens = sevenDaySeries.reduce(Int64(0)) { result, series in
+            result + series.dayBuckets.reduce(Int64(0)) { $0 + $1.tokens }
+        }
+        let expectedSevenDayTokens = overallBuckets.suffix(7).reduce(Int64(0)) { $0 + $1.tokens }
+        expect(sevenDaySeriesTokens == expectedSevenDayTokens, "seven-day window series should sum to the latest seven overall days")
+        expect(expectedSevenDayTokens > 0, "seven-day window fixture should carry activity")
 
         let expectedRecentTokens = Double(aggregateUsage(Array(overallBuckets.suffix(7))).tokens.visibleTotalTokens)
         let expectedPreviousTokens = Double(aggregateUsage(Array(overallBuckets.dropLast(7).suffix(7))).tokens.visibleTotalTokens)
